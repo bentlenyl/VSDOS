@@ -60,15 +60,12 @@ static void serial_initialize(void)
     uart_ready = 1;
 }
 
-static void serial_write_char(char character)
+static void serial_write_byte(char character)
 {
     u32 timeout = 100000;
 
     if (!uart_ready) {
         return;
-    }
-    if (character == '\n') {
-        serial_write_char('\r');
     }
     while (timeout != 0 && (inb(COM1 + 5) & 0x20) == 0) {
         --timeout;
@@ -78,6 +75,20 @@ static void serial_write_char(char character)
         return;
     }
     outb(COM1, (u8)character);
+}
+
+static void serial_write_char(char character)
+{
+    if (!uart_ready) {
+        return;
+    }
+    if (character == '\n') {
+        serial_write_byte('\r');
+    }
+    if (character >= 'a' && character <= 'z') {
+        character = (char)(character - 'a' + 'A');
+    }
+    serial_write_byte(character);
 }
 
 static void terminal_scroll(void)
@@ -159,8 +170,32 @@ static void terminal_write_bytes(const char *text, u32 length)
     u32 index;
 
     for (index = 0; index < length; ++index) {
-        terminal_write_char(text[index]);
+        char character = text[index];
+
+        if (character == '\n') {
+            serial_write_byte('\r');
+        }
+        serial_write_byte(character);
+
+        if (character == '\r') {
+            terminal_column = 0;
+        } else if (character == '\n') {
+            terminal_column = 0;
+            ++terminal_row;
+        } else {
+            VGA_MEMORY[terminal_row * VGA_WIDTH + terminal_column] =
+                (u16)0x0700 | (u8)character;
+            ++terminal_column;
+        }
+        if (terminal_column == VGA_WIDTH) {
+            terminal_column = 0;
+            ++terminal_row;
+        }
+        if (terminal_row >= VGA_HEIGHT) {
+            terminal_scroll();
+        }
     }
+    terminal_update_cursor();
 }
 
 static void terminal_clear(void)
