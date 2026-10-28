@@ -1,0 +1,1 @@
+qemu-system-i386 -machine pc -m 32M -drive "file=BUILDWITHEXTRAS.img,format=raw,if=ide,index=0,media=disk" -boot c -serial stdio -no-reboot -no-shutdown
