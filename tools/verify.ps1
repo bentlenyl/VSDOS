@@ -180,7 +180,7 @@ function Assert-KernelFileRead([string]$LogPath) {
         $serialBytes.WriteByte($value)
     }
 
-    $command = "type kernel.bin`r`n"
+    $command = "TYPE KERNEL.BIN`r`n"
     $commandStart = $log.LastIndexOf($command)
     if ($commandStart -lt 0) {
         throw "QEMU did not execute TYPE KERNEL.BIN in $LogPath."
@@ -214,24 +214,24 @@ try {
 
     $shellOutput = [IO.File]::ReadAllText($shellLog)
     foreach ($expected in @(
-        'IDT exceptions and PIC interrupts ready',
-        'PIT timer at 100 Hz; keyboard on IRQ1',
-        'FAT12 volume mounted from floppy drive A',
-        'HELP VER CLS ECHO DIR TYPE TIME MEM PANIC',
-        'Directory of A:\',
+        'IDT EXCEPTIONS AND PIC INTERRUPTS READY',
+        'PIT TIMER AT 100 HZ; KEYBOARD ON IRQ1',
+        'FAT12 VOLUME MOUNTED FROM FLOPPY DRIVE A',
+        'COMMANDS: HELP VER CLS ECHO DIR TYPE TIME MEM PANIC',
+        'DIRECTORY OF A:\',
         'KERNEL.BIN',
-        'VeryStupidDOS version 0.3',
-        'File not found: readme',
-        'Uptime:',
-        'Kernel image:',
-        'verifyok'
+        'VSDOS VERSION 0.1',
+        'FILE NOT FOUND: README',
+        'UPTIME:',
+        'KERNEL IMAGE:',
+        'VERIFYOK'
     )) {
         if (-not $shellOutput.Contains($expected)) {
             throw "Shell verification failed: expected output '$expected'."
         }
     }
-    if ($shellOutput -notmatch 'Uptime:\s+[0-9]+:[0-9]{2}\.[0-9] seconds' -or
-        $shellOutput -notmatch 'Kernel image:\s+[1-9][0-9]* bytes') {
+    if ($shellOutput -notmatch 'UPTIME:\s+[0-9]+:[0-9]{2}\.[0-9] SECONDS' -or
+        $shellOutput -notmatch 'KERNEL IMAGE:\s+[1-9][0-9]* BYTES') {
         throw 'Timer or kernel memory reporting returned an invalid value.'
     }
     Assert-KernelFileRead $shellLog
@@ -244,7 +244,7 @@ try {
     Stop-TestVm
 
     $panicOutput = [IO.File]::ReadAllText($panicLog)
-    foreach ($expected in @('KERNEL EXCEPTION', 'Vector: 6', 'Instruction: 0x', 'System halted.')) {
+    foreach ($expected in @('KERNEL EXCEPTION', 'VECTOR: 6', 'INSTRUCTION: 0X', 'SYSTEM HALTED.')) {
         if (-not $panicOutput.Contains($expected)) {
             throw "Exception verification failed: expected output '$expected'."
         }
@@ -262,8 +262,8 @@ try {
 
     $hardDiskOutput = [IO.File]::ReadAllText($hardDiskLog)
     foreach ($expected in @(
-        'FAT12 volume mounted from IDE hard disk C',
-        'Directory of C:\',
+        'FAT12 VOLUME MOUNTED FROM IDE HARD DISK C',
+        'DIRECTORY OF C:\',
         'KERNEL.BIN'
     )) {
         if (-not $hardDiskOutput.Contains($expected)) {
