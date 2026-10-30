@@ -111,7 +111,7 @@ disk_packet:
     dw 0x0800
     dq 1
 boot_message db 'VSDOS FAT-12 BOOT', 13, 10, 0
-error_message db 'ERROR: CAN'T LOAD DISK', 13, 10, 0
+error_message db "ERROR: CAN'T LOAD DISK", 13, 10, 0
 
 times 510 - ($ - $$) db 0
 dw 0xAA55
