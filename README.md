@@ -8,3 +8,6 @@ A 32-Bit DOS-Like OS that's somewhat inspired by Linux. Pretty much, I already d
 1: Download the project and extract it into a folder.
 2: Install the build tools needed.
 3: Run build.bat.
+
+# HOW TO RUN IN VIRTUALBOX
+You need a VM with a floppy drive. Put the built .img file into the floppy slot, and reboot.
