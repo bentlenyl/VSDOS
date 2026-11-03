@@ -16,6 +16,7 @@ static u16 input_start_position;
 static char command_line[128];
 static u8 command_length;
 static char current_drive_letter = 'A';
+static char current_directory[128] = "\\";
 
 static inline void outb(u16 port, u8 value)
 {
@@ -259,8 +260,98 @@ static void terminal_write_hex(u32 value)
 static void print_prompt(void)
 {
     terminal_write_char(current_drive_letter);
-    terminal_write(":\\>");
+    terminal_write(current_directory);
+    terminal_write(">");
     input_start_position = (u16)terminal_row * VGA_WIDTH + terminal_column;
+}
+
+static int make_current_path(const char *input, char output[128])
+{
+    u32 length = 0;
+    u32 index;
+
+    if (input == 0 || *input == '\0') {
+        return 0;
+    }
+    if (*input == '\\' || *input == '/') {
+        while (*input != '\0' && length < 127) {
+            output[length++] = *input++;
+        }
+    } else {
+        for (index = 0; current_directory[index] != '\0' &&
+            length < 127; ++index) {
+            output[length++] = current_directory[index];
+        }
+        if (length > 1 && length < 127) {
+            output[length++] = '\\';
+        }
+        while (*input != '\0' && length < 127) {
+            output[length++] = *input++;
+        }
+    }
+    if (*input != '\0') {
+        return 0;
+    }
+    output[length] = '\0';
+    return 1;
+}
+
+static int change_directory(const char *input)
+{
+    char path[128];
+    fs_entry entry;
+    u32 length;
+
+    if (input == 0 || *input == '\0' || string_equals(input, ".")) {
+        return 1;
+    }
+    if (input[0] == '\\' && input[1] == '\0') {
+        current_directory[0] = '\\';
+        current_directory[1] = '\0';
+        return 1;
+    }
+    if (string_equals(input, "..")) {
+        length = 0;
+        while (current_directory[length] != '\0') {
+            ++length;
+        }
+        while (length > 1 && current_directory[length - 1] != '\\') {
+            --length;
+        }
+        if (length > 1) {
+            current_directory[length - 1] = '\0';
+        } else {
+            current_directory[0] = '\\';
+            current_directory[1] = '\0';
+        }
+        return 1;
+    }
+    if (!make_current_path(input, path) ||
+        !filesystem_find(path, &entry) ||
+        (entry.attributes & 0x10) == 0) {
+        return 0;
+    }
+    if (path[0] == '\\') {
+        u32 index = 1;
+        while (path[index] != '\0' &&
+            index < sizeof(current_directory) - 1) {
+            current_directory[index - 1] = path[index];
+            ++index;
+        }
+        current_directory[index - 1] = '\0';
+        if (current_directory[0] == '\0') {
+            current_directory[0] = '\\';
+            current_directory[1] = '\0';
+        }
+    } else {
+        u32 index;
+        for (index = 0; path[index] != '\0' &&
+            index < sizeof(current_directory) - 1; ++index) {
+            current_directory[index] = path[index];
+        }
+        current_directory[index] = '\0';
+    }
+    return 1;
 }
 
 static void run_command(char *line)
@@ -289,7 +380,7 @@ static void run_command(char *line)
     }
 
     if (string_equals(line, "HELP")) {
-        terminal_write("COMMANDS: HELP VER CLS ECHO DIR TYPE TIME MEM PANIC\n");
+        terminal_write("COMMANDS: HELP VER CLS ECHO DIR TYPE WRITE DEL REN MD RD CD TIME MEM PANIC\n");
     } else if (string_equals(line, "VER")) {
         terminal_write("VSDOS version 0.1\n");
     } else if (string_equals(line, "CLS")) {
@@ -300,6 +391,8 @@ static void run_command(char *line)
     } else if (string_equals(line, "DIR")) {
         u32 entry_index = 0;
         u32 file_count = 0;
+        char *directory = arguments;
+        char path[128];
 
         if (!filesystem_is_mounted()) {
             terminal_write("ERROR: FAT-12 VOLUME NOT MOUNTED.\n");
@@ -307,8 +400,17 @@ static void run_command(char *line)
         }
         terminal_write("Directory of ");
         terminal_write_char(current_drive_letter);
-        terminal_write(":\\\n\n");
-        while (filesystem_get_entry(entry_index++, &entry)) {
+        terminal_write(":\\");
+        if (*directory != '\0') {
+            if (!make_current_path(directory, path)) {
+                terminal_write("ERROR: PATH TOO LONG.\n");
+                return;
+            }
+            terminal_write(path);
+        }
+        terminal_write("\n\n");
+        while (filesystem_get_entry_in(*directory ? path : current_directory,
+                entry_index++, &entry)) {
             terminal_write(entry.name);
             if ((entry.attributes & 0x10) != 0) {
                 terminal_write("  <DIR>\n");
@@ -329,9 +431,16 @@ static void run_command(char *line)
         terminal_write_unsigned(file_count);
         terminal_write(" file(s)\n");
     } else if (string_equals(line, "TYPE")) {
+        char path[128];
+
+        if (*arguments != '\0' && !make_current_path(arguments, path)) {
+            terminal_write("ERROR: PATH TOO LONG.\n");
+            return;
+        }
         if (!filesystem_is_mounted()) {
             terminal_write("ERROR: FAT-12 VOLUME NOT MOUNTED.\n");
-        } else if (!filesystem_find(arguments, &entry)) {
+        } else if (!filesystem_find(*arguments ? path : current_directory,
+                &entry)) {
             terminal_write("FILE NOT FOUND: ");
             terminal_write(arguments);
             terminal_write("\n");
@@ -341,6 +450,104 @@ static void run_command(char *line)
             terminal_write("\nERROR: DISK READ FAILED OR FAT-12 CHAIN INVALID.\n");
         } else {
             terminal_write("\n");
+        }
+    } else if (string_equals(line, "WRITE")) {
+        char *name = arguments;
+        char *data;
+        char path[128];
+        u32 length = 0;
+
+        while (*arguments != '\0' && *arguments != ' ' &&
+            *arguments != '\t') {
+            ++arguments;
+        }
+        if (*arguments != '\0') {
+            *arguments++ = '\0';
+            while (*arguments == ' ' || *arguments == '\t') {
+                ++arguments;
+            }
+        }
+        data = arguments;
+        while (data[length] != '\0') {
+            ++length;
+        }
+        if (!filesystem_is_mounted()) {
+            terminal_write("ERROR: FAT-12 VOLUME NOT MOUNTED.\n");
+        } else if (*name == '\0' || !make_current_path(name, path) ||
+            !filesystem_write_file(path, data, length)) {
+            terminal_write("ERROR: FILE WRITE FAILED.\n");
+        } else {
+            terminal_write("FILE WRITTEN.\n");
+        }
+    } else if (string_equals(line, "DEL")) {
+        char path[128];
+
+        if (!filesystem_is_mounted()) {
+            terminal_write("ERROR: FAT-12 VOLUME NOT MOUNTED.\n");
+        } else if (*arguments == '\0' || !make_current_path(arguments, path) ||
+            !filesystem_delete_file(path)) {
+            terminal_write("ERROR: FILE DELETE FAILED.\n");
+        } else {
+            terminal_write("FILE DELETED.\n");
+        }
+    } else if (string_equals(line, "REN")) {
+        char *old_name = arguments;
+        char *new_name;
+        char *new_name_end;
+        char old_path[128];
+        char new_path[128];
+
+        while (*arguments != '\0' && *arguments != ' ' &&
+            *arguments != '\t') {
+            ++arguments;
+        }
+        if (*arguments != '\0') {
+            *arguments++ = '\0';
+            while (*arguments == ' ' || *arguments == '\t') {
+                ++arguments;
+            }
+        }
+        new_name = arguments;
+        new_name_end = new_name;
+        while (*new_name_end != '\0' && *new_name_end != ' ' &&
+            *new_name_end != '\t') {
+            ++new_name_end;
+        }
+        *new_name_end = '\0';
+        if (!filesystem_is_mounted()) {
+            terminal_write("ERROR: FAT-12 VOLUME NOT MOUNTED.\n");
+        } else if (*old_name == '\0' || *new_name == '\0' ||
+            !make_current_path(old_name, old_path) ||
+            !make_current_path(new_name, new_path) ||
+            !filesystem_rename_file(old_path, new_path)) {
+            terminal_write("ERROR: FILE RENAME FAILED.\n");
+        } else {
+            terminal_write("FILE RENAMED.\n");
+        }
+    } else if (string_equals(line, "MD")) {
+        char path[128];
+
+        if (!filesystem_is_mounted() || *arguments == '\0' ||
+            !make_current_path(arguments, path) ||
+            !filesystem_make_directory(path)) {
+            terminal_write("ERROR: DIRECTORY CREATE FAILED.\n");
+        } else {
+            terminal_write("DIRECTORY CREATED.\n");
+        }
+    } else if (string_equals(line, "RD")) {
+        char path[128];
+
+        if (!filesystem_is_mounted() || *arguments == '\0' ||
+            !make_current_path(arguments, path) ||
+            !filesystem_remove_directory(path)) {
+            terminal_write("ERROR: DIRECTORY REMOVE FAILED.\n");
+        } else {
+            terminal_write("DIRECTORY REMOVED.\n");
+        }
+    } else if (string_equals(line, "CD") ||
+        string_equals(line, "CHDIR")) {
+        if (!filesystem_is_mounted() || !change_directory(arguments)) {
+            terminal_write("ERROR: INVALID DIRECTORY.\n");
         }
     } else if (string_equals(line, "TIME")) {
         ticks = timer_get_ticks();

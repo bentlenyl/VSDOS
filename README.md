@@ -11,3 +11,20 @@ A 32-Bit DOS-Like OS that's somewhat inspired by Linux. Pretty much, I already d
 
 # HOW TO RUN IN VIRTUALBOX
 You need a VM with a floppy drive. Put the built .img file into the floppy slot, and reboot.
+
+# COMMANDS
+- Help: Shows all commands.
+- Ver: Prints the OS version (Pretty inaccurate).
+- Cls: Clears screen.
+- Echo: Repeats whatever you type after (eg. echo hello prints hello).
+- Dir: Prints all files and folders in directory.
+- Type: Prints contents of whatever file you type after (eg. type hello.txt prints text inside hello.txt).
+- Write: Makes a file (eg. write hello.txt makes hello.txt).
+- Del: Deletes a file (eg. del hello.txt deletes hello.txt).
+- Ren: Renames a file (eg. ren hello.txt hello2.txt).
+- Md: Makes a directory (eg. md hello makes hello as a folder).
+- Rd: Removes a directory (eg. rd hello deletes hello folder).
+- Cd: Changes directory that you're in (eg. cd hello takes you into hello folder).
+- Time: Shows uptime.
+- Mem: Prints kernel memory info.
+- Panic: Makes the kernel panic (used as a test of error handling).

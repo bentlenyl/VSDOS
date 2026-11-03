@@ -40,7 +40,7 @@ echo   build.bat help     Show this help
 echo.
 echo Requires NASM, LLVM Clang/LLD, and QEMU for run, test, and verify.
 echo Build creates a fresh FAT12 image; back up user files before rebuilding.
-echo File creation, deletion, rename, and subdirectories are not implemented yet.
+echo WRITE creates or overwrites an 8.3 file with inline text; DEL, REN, DIR, TYPE, MD, RD, and CD support nested 8.3 paths.
 echo.
 exit /b 0
 

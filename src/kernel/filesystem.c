@@ -11,6 +11,8 @@
 #define FAT_ATTRIBUTE_DIRECTORY 0x10
 #define FAT_ATTRIBUTE_VOLUME 0x08
 #define FAT_ATTRIBUTE_LONG_NAME 0x0F
+#define FAT_ATTRIBUTE_ARCHIVE 0x20
+#define FAT12_FREE 0x0000
 
 static u8 fat_table[FAT_MAX_SECTORS_PER_FAT * FAT_SECTOR_SIZE];
 static u8 root_directory[FAT_ROOT_BUFFER_SIZE];
@@ -42,13 +44,6 @@ static u8 uppercase(u8 character)
         return (u8)(character - 'a' + 'A');
     }
     return character;
-}
-
-static int fat_entry_active(const u8 *raw_entry)
-{
-    return raw_entry[0] != 0 && raw_entry[0] != 0xE5 &&
-        raw_entry[11] != FAT_ATTRIBUTE_LONG_NAME &&
-        (raw_entry[11] & FAT_ATTRIBUTE_VOLUME) == 0;
 }
 
 static void format_filename(const u8 *raw_name, char *name)
@@ -204,144 +199,91 @@ int filesystem_is_mounted(void)
     return filesystem_mounted;
 }
 
-int filesystem_get_entry(u32 index, fs_entry *entry)
-{
-    u32 current;
-
-    if (!filesystem_mounted || entry == 0) {
-        return 0;
-    }
-
-    for (current = 0; current < root_entry_count; ++current) {
-        const u8 *raw_entry = &root_directory[current * 32];
-
-        if (raw_entry[0] == 0) {
-            return 0;
-        }
-        if (!fat_entry_active(raw_entry)) {
-            continue;
-        }
-        if (index != 0) {
-            --index;
-            continue;
-        }
-
-        format_filename(raw_entry, entry->name);
-        entry->size = read_u32(&raw_entry[28]);
-        entry->first_cluster = read_u16(&raw_entry[26]);
-        entry->attributes = raw_entry[11];
-        return 1;
-    }
-
-    return 0;
-}
-
-int filesystem_find(const char *name, fs_entry *entry)
-{
-    u8 wanted[11];
-    u32 index;
-
-    if (!filesystem_mounted || entry == 0 ||
-        !make_fat_filename(name, wanted)) {
-        return 0;
-    }
-
-    for (index = 0; index < root_entry_count; ++index) {
-        const u8 *raw_entry = &root_directory[index * 32];
-        u32 character;
-        int matches = 1;
-
-        if (raw_entry[0] == 0) {
-            return 0;
-        }
-        if (!fat_entry_active(raw_entry)) {
-            continue;
-        }
-        for (character = 0; character < sizeof(wanted); ++character) {
-            if (uppercase(raw_entry[character]) != wanted[character]) {
-                matches = 0;
-                break;
-            }
-        }
-        if (matches) {
-            format_filename(raw_entry, entry->name);
-            entry->size = read_u32(&raw_entry[28]);
-            entry->first_cluster = read_u16(&raw_entry[26]);
-            entry->attributes = raw_entry[11];
-            return 1;
-        }
-    }
-    return 0;
-}
 
 static int next_cluster(u16 cluster, u16 *next)
 {
     u32 offset = cluster + cluster / 2;
     u16 value;
-
-    if (cluster < FAT_CLUSTER_MIN || cluster >= cluster_count + 2 ||
-        offset + 1 >= sizeof(fat_table)) {
-        return 0;
-    }
+    if (cluster < FAT_CLUSTER_MIN || cluster >= cluster_count + 2 || offset + 1 >= sizeof(fat_table)) return 0;
     value = read_u16(&fat_table[offset]);
-    if ((cluster & 1) != 0) {
-        value >>= 4;
-    }
+    if (cluster & 1) value >>= 4;
     *next = value & 0x0FFF;
     return 1;
 }
-
-int filesystem_read_file(const fs_entry *entry, void (*write)(const char *, u32))
+static u16 fat_get(u16 c) { u32 o=c+c/2; u16 v=read_u16(&fat_table[o]); if(c&1)v>>=4; return v&0x0FFF; }
+static void fat_set(u16 c,u16 v) { u32 o=c+c/2, old=read_u16(&fat_table[o]); v&=0x0fff; if(!(c&1)){fat_table[o]=(u8)v;fat_table[o+1]=(u8)((old&0xf000)|(v>>8));}else{fat_table[o]=(u8)((old&15)|(v<<4));fat_table[o+1]=(u8)(v>>4);} }
+static int write_fat(void) { u8 b[512]; u16 r,spf; u8 nf; u32 c,s; if(!disk_read_sector(0,b))return 0; r=read_u16(&b[14]);nf=b[16];spf=read_u16(&b[22]);for(c=0;c<nf;++c)for(s=0;s<spf;++s)if(!disk_write_sector(r+c*spf+s,&fat_table[s*512]))return 0;return 1; }
+static int active(const u8 *r) { return r[0]!=0&&r[0]!=0xe5&&r[11]!=FAT_ATTRIBUTE_LONG_NAME&&(r[11]&FAT_ATTRIBUTE_VOLUME)==0; }
+static int same(const u8 *r,const u8 w[11]) { u32 i;if(!active(r))return 0;for(i=0;i<11;++i)if(uppercase(r[i])!=w[i])return 0;return 1; }
+static void fill_entry(const u8 *r,fs_entry *e){format_filename(r,e->name);e->size=read_u32(&r[28]);e->first_cluster=read_u16(&r[26]);e->attributes=r[11];}
+static int read_dir_entry(u16 dir,u32 wanted_index,u8 *out)
 {
-    u32 remaining;
-    u32 cluster_steps = 0;
-    u16 cluster;
-
-    if (!filesystem_mounted || entry == 0 || write == 0 ||
-        (entry->attributes & FAT_ATTRIBUTE_DIRECTORY) != 0) {
-        return 0;
+    u16 c=dir;u32 seen=0,lim=cluster_count,s,e;
+    while(1){u32 count=dir?sectors_per_cluster:root_directory_sectors, lba=dir?data_lba+(u32)(c-2)*sectors_per_cluster:root_directory_lba;
+        for(s=0;s<count;++s){if(dir&&!disk_read_sector(lba+s,sector_buffer))return 0;for(e=0;e<16;++e){u8 *r=dir?&sector_buffer[e*32]:&root_directory[s*512+e*32];if(r[0]==0)return 0;if(active(r)){if(seen++==wanted_index){for(u32 j=0;j<32;++j)out[j]=r[j];return 1;}}}}
+        if(!dir)return 0;{u16 next;if(!next_cluster(c,&next)||next>=FAT12_EOC||--lim==0)return 0;c=next;}
     }
-    if (entry->size == 0) {
-        return 1;
-    }
-
-    remaining = entry->size;
-    cluster = entry->first_cluster;
-    while (remaining != 0) {
-        u32 sector_in_cluster;
-
-        if (cluster < FAT_CLUSTER_MIN || cluster >= cluster_count + 2 ||
-            ++cluster_steps > cluster_count) {
-            return 0;
-        }
-
-        for (sector_in_cluster = 0;
-            sector_in_cluster < sectors_per_cluster && remaining != 0;
-            ++sector_in_cluster) {
-            u32 lba = data_lba +
-                (u32)(cluster - FAT_CLUSTER_MIN) * sectors_per_cluster +
-                sector_in_cluster;
-            u32 bytes = remaining < FAT_SECTOR_SIZE
-                ? remaining
-                : FAT_SECTOR_SIZE;
-
-            if (!disk_read_sector(lba, sector_buffer)) {
-                return 0;
-            }
-            write((const char *)sector_buffer, bytes);
-            remaining -= bytes;
-        }
-
-        if (remaining != 0) {
-            u16 following_cluster;
-
-            if (!next_cluster(cluster, &following_cluster) ||
-                following_cluster >= FAT12_EOC) {
-                return 0;
-            }
-            cluster = following_cluster;
-        }
-    }
-
-    return 1;
 }
+static int find_entry(u16 dir,const u8 w[11],u8 *out,u16 *where,u32 *lba,u32 *off)
+{
+    u16 c=dir;u32 lim=cluster_count,s,e;
+    while(1){u32 count=dir?sectors_per_cluster:root_directory_sectors,base=dir?data_lba+(u32)(c-2)*sectors_per_cluster:root_directory_lba;
+        for(s=0;s<count;++s){if(dir&&!disk_read_sector(base+s,sector_buffer))return 0;for(e=0;e<16;++e){u8 *r=dir?&sector_buffer[e*32]:&root_directory[s*512+e*32];if(r[0]==0)return 0;if(same(r,w)){if(out)for(u32 j=0;j<32;++j)out[j]=r[j];if(where)*where=c;if(lba)*lba=base+s;if(off)*off=e*32;return 1;}}}
+        if(!dir)return 0;{u16 next;if(!next_cluster(c,&next)||next>=FAT12_EOC||--lim==0)return 0;c=next;}
+    }
+}
+static int resolve(const char *path,u16 *parent,u8 leaf[11])
+{
+    char part[13];const char *p=path,*q;u8 w[11];u8 raw[32];fs_entry e;u32 n,i;
+    *parent=0;while(*p=='/'||*p=='\\')++p;if(!*p)return 0;
+    for(;;){q=p;while(*q&&*q!='/'&&*q!='\\')++q;n=(u32)(q-p);if(n==0||n>=sizeof(part))return 0;for(i=0;i<n;++i)part[i]=p[i];part[n]=0;while(*q=='/'||*q=='\\')++q;
+        if(!*q)return make_fat_filename(part,leaf);
+        if(!make_fat_filename(part,w)||!find_entry(*parent,w,raw,0,0,0))return 0;fill_entry(raw,&e);if(!(e.attributes&FAT_ATTRIBUTE_DIRECTORY))return 0;*parent=e.first_cluster;p=q;
+    }
+}
+static int write_entry(u16 dir,u32 lba,u32 off,const u8 *raw){u32 i;if(!disk_read_sector(lba,sector_buffer))return 0;for(i=0;i<32;++i)sector_buffer[off+i]=raw[i];if(!disk_write_sector(lba,sector_buffer))return 0;if(!disk_read_sector(lba,sector_buffer)||sector_buffer[off]!=raw[0])return 0;if(!dir)for(i=0;i<32;++i)root_directory[(lba-root_directory_lba)*512+off+i]=raw[i];return 1;}
+static int free_slot(u16 dir,u32 *lba,u32 *off)
+{
+    u16 c=dir;u32 lim=cluster_count,s,e;while(1){u32 count=dir?sectors_per_cluster:root_directory_sectors,base=dir?data_lba+(u32)(c-2)*sectors_per_cluster:root_directory_lba;if(dir){*lba=base;*off=64;return 1;}for(s=0;s<count;++s){for(e=0;e<16;++e){u8 *r=&root_directory[s*512+e*32];if(r[0]==0||r[0]==0xe5){*lba=base+s;*off=e*32;return 1;}}}if(!dir){return 0;}{u16 next;if(!next_cluster(c,&next)||next>=FAT12_EOC||--lim==0){return 0;}c=next;}}
+}
+static int release(u16 c){u32 n=0;while(c){u16 x;if(c<2||c>=cluster_count+2||++n>cluster_count||!next_cluster(c,&x))return 0;fat_set(c,0);c=x>=FAT12_EOC?0:x;}return 1;}
+static int alloc(u32 count,u16 *first){u32 c,n=0;u16 prev=0;*first=0;for(c=2;c<cluster_count+2&&n<count;++c)if(fat_get((u16)c)==0&&(((data_lba+(c-2)*sectors_per_cluster)/18)%2)==0){fat_set((u16)c,FAT12_EOC);if(prev)fat_set(prev,(u16)c);else *first=(u16)c;prev=(u16)c;++n;}return n==count;}
+static int file_clusters(u16 c){u32 n=0,lim=0;while(c){u16 x;if(c<2||c>=cluster_count+2||++lim>cluster_count||!next_cluster(c,&x))return -1;++n;c=x>=FAT12_EOC?0:x;}return (int)n;}
+static int locate(const char *path,u16 *dir,u8 w[11],u8 raw[32],u32 *lba,u32 *off){if(!resolve(path,dir,w))return 0;return find_entry(*dir,w,raw,0,lba,off);}
+int filesystem_get_entry_in(const char *path,u32 index,fs_entry *e){u16 d;u8 w[11],r[32];if(path&&*path&&!(path[0]=='\\'&&path[1]==0)){if(!resolve(path,&d,w))return 0;if(!find_entry(d,w,r,0,0,0))return 0;fill_entry(r,e);if(!(e->attributes&FAT_ATTRIBUTE_DIRECTORY))return 0;d=e->first_cluster;}else d=0;if(!read_dir_entry(d,index,r))return 0;fill_entry(r,e);return 1;}
+int filesystem_get_entry(u32 i,fs_entry *e){return filesystem_get_entry_in("\\",i,e);}
+int filesystem_find(const char *path,fs_entry *e){u16 d;u8 w[11],r[32];u32 l,o;if(!filesystem_mounted||!locate(path,&d,w,r,&l,&o))return 0;fill_entry(r,e);return 1;}
+int filesystem_read_file(const fs_entry *e,void(*write)(const char*,u32)){u32 left=e?e->size:0,steps=0;u16 c=e?e->first_cluster:0;if(!filesystem_mounted||!e||!write||(e->attributes&16))return 0;while(left){u32 s;if(c<2||c>=cluster_count+2||++steps>cluster_count)return 0;for(s=0;s<sectors_per_cluster&&left;++s){u32 bytes=left<512?left:512;if(!disk_read_sector(data_lba+(u32)(c-2)*sectors_per_cluster+s,sector_buffer))return 0;write((const char*)sector_buffer,bytes);left-=bytes;}if(left){u16 next;if(!next_cluster(c,&next))return 0;c=next;}}return 1;}
+int filesystem_delete_file(const char *path){u16 d;u8 w[11],r[32];u32 l,o;if(!locate(path,&d,w,r,&l,&o)||(r[11]&16))return 0;if(read_u16(&r[26])&&!release(read_u16(&r[26])))return 0;r[0]=0xe5;return write_entry(d,l,o,r)&&write_fat();}
+int filesystem_rename_file(const char *oldp,const char *newp){u16 d,nd;u8 w[11],nw[11],r[32],nr[32];u32 l,o;if(!locate(oldp,&d,w,r,&l,&o)||!resolve(newp,&nd,nw)||find_entry(nd,nw,nr,0,0,0)||d!=nd)return 0;for(u32 i=0;i<11;++i)r[i]=nw[i];return write_entry(d,l,o,r);}
+int filesystem_write_file(const char *path,const char *data,u32 size){u16 d,first=0,old=0,next;u8 w[11],r[32];u32 l,o,oldn=0,need,c,off=0,s;if(locate(path,&d,w,r,&l,&o)){fs_entry e;fill_entry(r,&e);if(e.attributes&16)return 0;old=e.first_cluster;oldn=file_clusters(old);if(oldn<0)return 0;}else{if(!resolve(path,&d,w)||find_entry(d,w,r,0,0,0)||!free_slot(d,&l,&o))return 0;}need=size?(size+sectors_per_cluster*512-1)/(sectors_per_cluster*512):0;if(need&& !alloc(need,&first))return 0;if(old&& !release(old))return 0;for(c=first,off=0;off<size;off+=sectors_per_cluster*512){u32 bytes=size-off<sectors_per_cluster*512?size-off:sectors_per_cluster*512;for(s=0;s<sectors_per_cluster;++s){u32 at=s*512,copy=bytes>at?(bytes-at<512?bytes-at:512):0;for(u32 i=0;i<512;++i)sector_buffer[i]=i<copy?(u8)data[off+at+i]:0;if(!disk_write_sector(data_lba+(u32)(c-2)*sectors_per_cluster+s,sector_buffer))return 0;}if(off+bytes<size&&!next_cluster(c,&next))return 0;c=next;}for(u32 i=0;i<11;++i)r[i]=w[i];r[11]=FAT_ATTRIBUTE_ARCHIVE;r[26]=(u8)first;r[27]=(u8)(first>>8);r[28]=(u8)size;r[29]=(u8)(size>>8);r[30]=(u8)(size>>16);r[31]=(u8)(size>>24);return write_entry(d,l,o,r)&&write_fat();}
+int filesystem_make_directory(const char *path)
+{
+    u16 d, c;
+    u8 w[11], r[32];
+    u32 l, o, i;
+
+    if (!resolve(path, &d, w)) return 0;
+    if (find_entry(d, w, r, 0, 0, 0)) return 0;
+    if (!free_slot(d, &l, &o)) return 0;
+    if (!alloc(1, &c)) return 0;
+    for (i = 0; i < 512; ++i) sector_buffer[i] = 0;
+    sector_buffer[0] = '.';
+    for (i = 1; i < 11; ++i) sector_buffer[i] = ' ';
+    sector_buffer[11] = 16;
+    sector_buffer[26] = (u8)c; sector_buffer[27] = (u8)(c >> 8);
+    sector_buffer[32] = '.'; sector_buffer[33] = '.';
+    for (i = 34; i < 43; ++i) sector_buffer[i] = ' ';
+    sector_buffer[43] = 16;
+    sector_buffer[58] = (u8)d; sector_buffer[59] = (u8)(d >> 8);
+    if (!disk_write_sector(data_lba + (u32)(c - 2) * sectors_per_cluster, sector_buffer) &&
+        !disk_write_sector(data_lba + (u32)(c - 2) * sectors_per_cluster, sector_buffer)) {
+        fat_set(c, 0); return 0;
+    }
+    for (i = 0; i < 11; ++i) r[i] = w[i];
+    r[11] = 16; r[26] = (u8)c; r[27] = (u8)(c >> 8);
+    r[28] = r[29] = r[30] = r[31] = 0;
+    if (!write_entry(d, l, o, r)) { fat_set(c, 0); return 0; }
+    if (!write_fat()) return 0;
+    return 1;
+}int filesystem_remove_directory(const char *path){u16 d,c;u8 w[11],r[32],x[32];u32 l,o;if(!locate(path,&d,w,r,&l,&o)||(!(r[11]&16))||(read_u16(&r[26])==0))return 0;c=read_u16(&r[26]);if(read_dir_entry(c,0,x)&&x[0]!='.' )return 0;/* reject any active entry other than . and .. */for(u32 i=2;read_dir_entry(c,i,x);++i)return 0;if(!release(c))return 0;r[0]=0xe5;return write_entry(d,l,o,r)&&write_fat();}

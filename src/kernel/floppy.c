@@ -19,6 +19,7 @@
 
 static u8 selected_drive;
 static u8 current_cylinder[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
+static u8 current_head[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
 static u8 motor_running[4];
 static u8 controller_ready;
 static u8 initialization_error;
@@ -174,7 +175,6 @@ static int seek_track(u8 cylinder, u8 head)
     if (current_cylinder[selected_drive] == cylinder) {
         return 1;
     }
-
     previous_irq = interrupt_irq_count(6);
     if (!write_fifo(0x0F) ||
         !write_fifo(head_drive) ||
@@ -229,6 +229,9 @@ static int transfer_sector(u32 lba, int write)
     cylinder = (u8)(lba / (FDC_HEADS * FDC_SECTORS_PER_TRACK));
     head = (u8)((lba / FDC_SECTORS_PER_TRACK) % FDC_HEADS);
     sector = (u8)(lba % FDC_SECTORS_PER_TRACK + 1);
+    if (write && current_head[selected_drive] != head) {
+        current_cylinder[selected_drive] = (u8)(cylinder == 0 ? 1 : cylinder - 1);
+    }
     if (!seek_track(cylinder, head)) {
         if (!recalibrate() || !seek_track(cylinder, head)) {
             return 0;
@@ -260,6 +263,7 @@ static int transfer_sector(u32 lba, int write)
         }
         if ((result[0] & 0xC0) == 0 && result[1] == 0 &&
             result[2] == 0 && result[6] == 2) {
+            current_head[selected_drive] = head;
             return 1;
         }
 

@@ -141,6 +141,7 @@ function Send-GuestCommand([string]$Command) {
         switch ($character) {
             ' ' { Send-GuestKey 'spc' }
             '.' { Send-GuestKey 'dot' }
+            '\' { Send-GuestKey 'backslash' }
             default { Send-GuestKey ([string]$character) }
         }
     }
@@ -204,7 +205,7 @@ foreach ($log in @($shellLog, $panicLog, $hardDiskLog)) {
 try {
     Write-Output '[verify] Booting kernel and exercising the shell...'
     Start-TestVm $shellLog
-    foreach ($command in @('help', 'dir', 'type kernel.bin', 'type readme', 'time', 'mem', 'echo verifyok')) {
+    foreach ($command in @('help', 'dir', 'type kernel.bin', 'type readme', 'md docs', 'md docs\sub', 'cd docs', 'write sub\test.txt nestedwrite', 'dir', 'type sub\test.txt', 'ren sub\test.txt sub\renamed.txt', 'del sub\renamed.txt', 'rd sub', 'cd \', 'rd docs', 'write test.txt verifywrite', 'ren test.txt renamed.txt', 'type renamed.txt', 'del renamed.txt', 'type renamed.txt', 'time', 'mem', 'echo verifyok')) {
         Send-GuestCommand $command
         if ($command -eq 'type kernel.bin') {
             Start-Sleep -Seconds 3
@@ -217,9 +218,17 @@ try {
         'IDT EXCEPTIONS AND PIC INTERRUPTS READY',
         'PIT TIMER AT 100 HZ; KEYBOARD ON IRQ1',
         'FAT12 VOLUME MOUNTED FROM FLOPPY DRIVE A',
-        'COMMANDS: HELP VER CLS ECHO DIR TYPE TIME MEM PANIC',
+        'COMMANDS: HELP VER CLS ECHO DIR TYPE WRITE DEL REN MD RD CD TIME MEM PANIC',
         'DIRECTORY OF A:\',
         'KERNEL.BIN',
+        'FILE WRITTEN.',
+        'FILE RENAMED.',
+        'FILE DELETED.',
+        'DIRECTORY CREATED.',
+        'NESTEDWRITE',
+        'DIRECTORY REMOVED.',
+        'VERIFYWRITE',
+        'FILE NOT FOUND: RENAMED.TXT',
         'VSDOS VERSION 0.1',
         'FILE NOT FOUND: README',
         'UPTIME:',
