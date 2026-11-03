@@ -3,7 +3,11 @@ param(
     [string]$StageDirectory,
 
     [Parameter(Mandatory = $true)]
-    [string]$OutputPath
+    [string]$OutputPath,
+
+    [string]$AppPath,
+
+    [string]$ShellPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -107,6 +111,12 @@ function Add-File([string]$Name, [byte[]]$Contents) {
     Add-RootEntry $Name 0x20 $firstCluster $Contents.Length
 }
 
+if ($AppPath -and [IO.File]::Exists($AppPath)) {
+    Add-File 'MAIN.APP' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $AppPath)))
+}
+if ($ShellPath -and [IO.File]::Exists($ShellPath)) {
+    Add-File 'COMMAND.APP' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $ShellPath)))
+}
 Add-File 'KERNEL.BIN' $kernel
 
 for ($copy = 0; $copy -lt $fatCount; ++$copy) {
@@ -118,4 +128,4 @@ for ($copy = 0; $copy -lt $fatCount; ++$copy) {
 [IO.File]::WriteAllBytes($output, $image)
 Write-Output "Created FAT12 floppy image: $output"
 Write-Output 'Volume: 1.44 MB FAT12, 512-byte sectors, root file KERNEL.BIN'
-Write-Output 'The volume is freshly formatted; add user files with a FAT12 image tool after building.'
+Write-Output 'The volume is freshly formatted with KERNEL.BIN, COMMAND.APP, and MAIN.APP.'

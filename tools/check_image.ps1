@@ -132,10 +132,14 @@ for ($index = 0; $index -lt $fat.Length; ++$index) {
     }
 }
 Assert-FileInRoot $kernel 'KERNEL.BIN'
-for ($entry = 1; $entry -lt $rootEntries; ++$entry) {
+$app = [IO.File]::ReadAllBytes((Join-Path $stage '..\..\sdk\build\MAIN.APP'))
+Assert-FileInRoot $app 'MAIN.APP'
+$commandApp = [IO.File]::ReadAllBytes((Join-Path $stage 'COMMAND.APP'))
+Assert-FileInRoot $commandApp 'COMMAND.APP'
+for ($entry = 3; $entry -lt $rootEntries; ++$entry) {
     if ($image[$rootOffset + $entry * 32] -ne 0) {
         throw 'New FAT12 volumes must contain only KERNEL.BIN; unexpected preloaded files found.'
     }
 }
 
-Write-Output "FAT12 image check passed: standard BPB, BIOS loaders, $clusterCount data clusters, and KERNEL.BIN."
+Write-Output "FAT12 image check passed: standard BPB, BIOS loaders, KERNEL.BIN, COMMAND.APP, and MAIN.APP."

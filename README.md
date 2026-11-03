@@ -28,3 +28,7 @@ You need a VM with a floppy drive. Put the built .img file into the floppy slot,
 - Time: Shows uptime.
 - Mem: Prints kernel memory info.
 - Panic: Makes the kernel panic (used as a test of error handling).
+- Run: Loads and runs a flat 32-bit `.APP` from FAT12.
+
+# APPLICATION API AND SDK
+The SDK and application API let you make an app for the OS. The API folder works standalone from the OS, so you don't need the OS source code to develop an app. Apps call int 0x80 API through the SDK runtime. The SDK builds MAIN.APP, which is a starter file to add your code into. More info on this will come soon.

@@ -32,5 +32,7 @@ int keyboard_read_scancode(u8 *scan_code);
 u32 timer_get_ticks(void);
 u32 interrupt_irq_count(u8 irq);
 void kernel_exception(const interrupt_frame *frame);
+void syscall_dispatch(interrupt_frame *frame);
+void interrupt_dispatch(interrupt_frame *frame);
 
 #endif

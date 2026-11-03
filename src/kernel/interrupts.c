@@ -24,7 +24,7 @@ typedef struct {
     u32 base;
 } __attribute__((packed)) idt_register;
 
-static idt_gate interrupt_table[48];
+static idt_gate interrupt_table[129];
 static volatile u8 keyboard_queue[128];
 static volatile u8 keyboard_head;
 static volatile u8 keyboard_tail;
@@ -33,6 +33,7 @@ static volatile u32 irq_counts[16];
 
 extern void (*exception_stub_table[32])(void);
 extern void (*irq_stub_table[16])(void);
+extern void syscall_stub(void);
 extern void idt_load(const idt_register *register_pointer);
 
 static inline void outb(u16 port, u8 value)
@@ -106,6 +107,8 @@ void interrupts_initialize(void)
     for (index = 0; index < 16; ++index) {
         idt_set_gate((u8)(index + 32), irq_stub_table[index]);
     }
+    idt_set_gate(0x80, syscall_stub);
+    interrupt_table[0x80].type_attributes = 0x8F;
 
     descriptor.limit = (u16)(sizeof(interrupt_table) - 1);
     descriptor.base = (u32)interrupt_table;
@@ -151,11 +154,15 @@ u32 interrupt_irq_count(u8 irq)
     return irq_counts[irq];
 }
 
-void interrupt_dispatch(const interrupt_frame *frame)
+void interrupt_dispatch(interrupt_frame *frame)
 {
     u32 vector = frame->interrupt_number;
     u32 irq;
 
+    if (vector == 0x80) {
+        syscall_dispatch(frame);
+        return;
+    }
     if (vector < 32) {
         kernel_exception(frame);
         for (;;) {

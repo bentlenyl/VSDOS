@@ -8,15 +8,224 @@
 #define VGA_CRTC_INDEX 0x3D4
 #define VGA_CRTC_DATA 0x3D5
 #define COM1 0x3F8
+#define SHELL_LOAD_ADDRESS 0x00200000
+#define APP_LOAD_ADDRESS 0x00220000
+#define APP_MAX_SIZE 0x00020000
+#define SYS_WRITE 1
+#define SYS_READ_KEY 2
+#define SYS_READ_FILE 3
+#define SYS_WRITE_FILE 4
+#define SYS_TICKS 5
+#define SYS_EXIT 6
+#define SYS_LIST 7
+#define SYS_DELETE 8
+#define SYS_RENAME 9
+#define SYS_MKDIR 10
+#define SYS_RMDIR 11
+#define SYS_RUN 12
+#define SYS_CLEAR 13
+#define SYS_WRITE_TEXT 14
+#define SYS_TYPE_FILE 15
+#define SYS_DRIVE 16
 
 static u8 terminal_row;
 static u8 terminal_column;
 static u8 uart_ready;
 static u16 input_start_position;
-static char command_line[128];
-static u8 command_length;
 static char current_drive_letter = 'A';
-static char current_directory[128] = "\\";
+static char *syscall_file_buffer;
+static u32 syscall_file_capacity;
+static u32 syscall_file_length;
+static u32 app_exit_code;
+static int run_app(const char *path, u32 load_address);
+
+static void terminal_write_bytes(const char *text, u32 length);
+static void terminal_write(const char *text);
+static void terminal_write_char(char character);
+static void terminal_clear(void);
+
+static void terminal_write_unsigned(u32 value)
+{
+    char digits[10];
+    u8 count = 0;
+
+    do {
+        digits[count++] = (char)('0' + value % 10);
+        value /= 10;
+    } while (value != 0);
+    while (count != 0) {
+        terminal_write_char(digits[--count]);
+    }
+}
+
+static void terminal_write_hex(u32 value)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    int shift;
+
+    terminal_write("0x");
+    for (shift = 28; shift >= 0; shift -= 4) {
+        terminal_write_char(digits[(value >> shift) & 0x0F]);
+    }
+}
+
+static void syscall_file_sink(const char *data, u32 length)
+{
+    u32 available = syscall_file_capacity - syscall_file_length;
+    u32 index;
+
+    if (length > available) {
+        length = available;
+    }
+    for (index = 0; index < length; ++index) {
+        syscall_file_buffer[syscall_file_length + index] = data[index];
+    }
+    syscall_file_length += length;
+}
+
+void syscall_dispatch(interrupt_frame *frame)
+{
+    const char *path;
+    fs_entry entry;
+
+    switch (frame->eax) {
+    case SYS_WRITE:
+        if (frame->ebx != 0 && frame->ecx != 0) {
+            terminal_write_bytes((const char *)frame->ebx, frame->ecx);
+        }
+        frame->eax = 0;
+        break;
+    case SYS_WRITE_TEXT:
+        if (frame->ebx != 0 && frame->ecx != 0) {
+            terminal_write_bytes((const char *)frame->ebx, frame->ecx);
+        }
+        frame->eax = 0;
+        break;
+    case SYS_TYPE_FILE:
+        path = (const char *)frame->ebx;
+        if (path == 0 || !filesystem_find(path, &entry) ||
+            !filesystem_read_file(&entry, terminal_write_bytes)) {
+            frame->eax = 0xFFFFFFFF;
+        } else {
+            frame->eax = 0;
+        }
+        break;
+    case SYS_DRIVE:
+        frame->eax = (u32)(u8)current_drive_letter;
+        break;
+    case SYS_READ_KEY: {
+        u8 scan_code;
+        frame->eax = keyboard_read_scancode(&scan_code) ? scan_code : 0;
+        break;
+    }
+    case SYS_READ_FILE:
+        path = (const char *)frame->ebx;
+        syscall_file_buffer = (char *)frame->ecx;
+        syscall_file_capacity = frame->edx;
+        syscall_file_length = 0;
+        if (path == 0 || syscall_file_buffer == 0 ||
+            !filesystem_find(path, &entry) ||
+            !filesystem_read_file(&entry, syscall_file_sink)) {
+            frame->eax = 0xFFFFFFFF;
+        } else {
+            frame->eax = syscall_file_length;
+        }
+        break;
+    case SYS_WRITE_FILE:
+        path = (const char *)frame->ebx;
+        if (path == 0 || frame->ecx == 0) {
+            frame->eax = 0xFFFFFFFF;
+        } else {
+            frame->eax = filesystem_write_file(
+                path, (const char *)frame->ecx, frame->edx) ? 0 : 0xFFFFFFFF;
+        }
+        break;
+    case SYS_LIST:
+        if (frame->ebx == 0 || frame->edx == 0 ||
+            !filesystem_get_entry_in((const char *)frame->ebx, frame->ecx,
+                (fs_entry *)frame->edx)) {
+            frame->eax = 0xFFFFFFFF;
+        } else {
+            frame->eax = 0;
+        }
+        break;
+    case SYS_DELETE:
+        frame->eax = frame->ebx != 0 &&
+            filesystem_delete_file((const char *)frame->ebx) ? 0 : 0xFFFFFFFF;
+        break;
+    case SYS_RENAME:
+        frame->eax = frame->ebx != 0 && frame->ecx != 0 &&
+            filesystem_rename_file((const char *)frame->ebx,
+                (const char *)frame->ecx) ? 0 : 0xFFFFFFFF;
+        break;
+    case SYS_MKDIR:
+        frame->eax = frame->ebx != 0 &&
+            filesystem_make_directory((const char *)frame->ebx) ? 0 : 0xFFFFFFFF;
+        break;
+    case SYS_RMDIR:
+        frame->eax = frame->ebx != 0 &&
+            filesystem_remove_directory((const char *)frame->ebx) ? 0 : 0xFFFFFFFF;
+        break;
+    case SYS_RUN:
+        frame->eax = frame->ebx != 0 &&
+            run_app((const char *)frame->ebx, APP_LOAD_ADDRESS) ? 0 : 0xFFFFFFFF;
+        break;
+    case SYS_CLEAR:
+        terminal_clear();
+        frame->eax = 0;
+        break;
+    case SYS_TICKS:
+        frame->eax = timer_get_ticks();
+        break;
+    case SYS_EXIT:
+        app_exit_code = frame->ebx;
+        frame->eax = 0;
+        break;
+    default:
+        frame->eax = 0xFFFFFFFF;
+        break;
+    }
+}
+
+static u32 app_copy_offset;
+static u32 app_load_address;
+
+static void app_file_sink(const char *data, u32 length)
+{
+    u32 index;
+    volatile u8 *destination = (volatile u8 *)app_load_address;
+
+    if (app_copy_offset + length > APP_MAX_SIZE) {
+        length = APP_MAX_SIZE - app_copy_offset;
+    }
+    for (index = 0; index < length; ++index) {
+        destination[app_copy_offset + index] = (u8)data[index];
+    }
+    app_copy_offset += length;
+}
+
+static int run_app(const char *path, u32 load_address)
+{
+    fs_entry entry;
+    void (*entry_point)(void);
+
+    if (!filesystem_find(path, &entry) || (entry.attributes & 0x10) != 0 ||
+        entry.size == 0 || entry.size > APP_MAX_SIZE) {
+        return 0;
+    }
+    app_copy_offset = 0;
+    app_load_address = load_address;
+    app_exit_code = 0;
+    if (!filesystem_read_file(&entry, app_file_sink)) {
+        return 0;
+    }
+    if (app_copy_offset != entry.size) {
+        return 0;
+    }
+    entry_point = (void (*)(void))load_address;
+    entry_point();
+    return 1;
+}
 
 static inline void outb(u16 port, u8 value)
 {
@@ -173,6 +382,10 @@ static void terminal_write_bytes(const char *text, u32 length)
     for (index = 0; index < length; ++index) {
         char character = text[index];
 
+        if (character == '\b') {
+            terminal_write_char(character);
+            continue;
+        }
         if (character == '\n') {
             serial_write_byte('\r');
         }
@@ -211,6 +424,7 @@ static void terminal_clear(void)
     terminal_update_cursor();
 }
 
+#if 0
 static char uppercase(char character)
 {
     if (character >= 'a' && character <= 'z') {
@@ -380,7 +594,7 @@ static void run_command(char *line)
     }
 
     if (string_equals(line, "HELP")) {
-        terminal_write("COMMANDS: HELP VER CLS ECHO DIR TYPE WRITE DEL REN MD RD CD TIME MEM PANIC\n");
+        terminal_write("COMMANDS: HELP VER CLS ECHO DIR TYPE RUN WRITE DEL REN MD RD CD TIME MEM PANIC\n");
     } else if (string_equals(line, "VER")) {
         terminal_write("VSDOS version 0.1\n");
     } else if (string_equals(line, "CLS")) {
@@ -450,6 +664,13 @@ static void run_command(char *line)
             terminal_write("\nERROR: DISK READ FAILED OR FAT-12 CHAIN INVALID.\n");
         } else {
             terminal_write("\n");
+        }
+    } else if (string_equals(line, "RUN")) {
+        char path[128];
+
+        if (!filesystem_is_mounted() || *arguments == '\0' ||
+            !make_current_path(arguments, path) || !run_app(path)) {
+            terminal_write("ERROR: APP FAILED OR NOT FOUND.\n");
         }
     } else if (string_equals(line, "WRITE")) {
         char *name = arguments;
@@ -678,6 +899,8 @@ static void keyboard_process_scancode(u8 scan_code)
     }
 }
 
+#endif
+
 void kernel_exception(const interrupt_frame *frame)
 {
     terminal_write("\n\n*** KERNEL EXCEPTION ***\nVector: ");
@@ -735,16 +958,10 @@ void kernel_main(u32 boot_information)
             terminal_write("[FAIL] FAT-12 VOLUME UNAVALIBLE; DIR AND TYPE DISABLED\n");
         }
     }
-    terminal_write("VSDOS version 0.1\n");
-    terminal_write("TYPE HELP FOR COMMANDS - USING FAT-12.\n\n");
-    print_prompt();
-
-    for (;;) {
-        u8 scan_code;
-
-        while (keyboard_read_scancode(&scan_code)) {
-            keyboard_process_scancode(scan_code);
+    if (!run_app("\\COMMAND.APP", SHELL_LOAD_ADDRESS)) {
+        terminal_write("[FAIL] COMMAND.APP COULD NOT BE STARTED\n");
+        for (;;) {
+            interrupts_wait();
         }
-        interrupts_wait();
     }
 }

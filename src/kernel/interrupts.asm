@@ -77,6 +77,12 @@ IRQ_STUB 13, 45
 IRQ_STUB 14, 46
 IRQ_STUB 15, 47
 
+global syscall_stub
+syscall_stub:
+    push dword 0
+    push dword 0x80
+    jmp interrupt_common
+
 interrupt_common:
     push ds
     push es

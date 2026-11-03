@@ -168,28 +168,33 @@ function Stop-TestVm {
     }
 }
 
-function Assert-KernelFileRead([string]$LogPath) {
+function Assert-FileRead([string]$LogPath, [string]$FileName) {
     $encoding = [Text.Encoding]::GetEncoding(28591)
     $log = $encoding.GetString([IO.File]::ReadAllBytes($LogPath))
-    $kernel = [IO.File]::ReadAllBytes((Join-Path $testDirectory 'kernel.bin'))
+    $filePath = if ($FileName -ieq 'MAIN.APP') {
+        Join-Path $PSScriptRoot '..\sdk\build\MAIN.APP'
+    } else {
+        Join-Path $testDirectory $FileName
+    }
+    $file = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $filePath))
     $serialBytes = [IO.MemoryStream]::new()
 
-    foreach ($value in $kernel) {
+    foreach ($value in $file) {
         if ($value -eq 10) {
             $serialBytes.WriteByte(13)
         }
         $serialBytes.WriteByte($value)
     }
 
-    $command = "TYPE KERNEL.BIN`r`n"
-    $commandStart = $log.LastIndexOf($command)
+    $command = "TYPE $($FileName.ToUpperInvariant())`r`n"
+    $commandStart = $log.LastIndexOf($command, [StringComparison]::OrdinalIgnoreCase)
     if ($commandStart -lt 0) {
-        throw "QEMU did not execute TYPE KERNEL.BIN in $LogPath."
+        throw "QEMU did not execute TYPE $FileName in $LogPath."
     }
     $expected = $encoding.GetString($serialBytes.ToArray())
     $dataStart = $commandStart + $command.Length
     if ($log.IndexOf($expected, $dataStart) -lt 0) {
-        throw "TYPE KERNEL.BIN did not return the exact on-disk kernel bytes in $LogPath."
+        throw "TYPE $FileName did not return the exact on-disk file bytes in $LogPath."
     }
 }
 
@@ -205,11 +210,8 @@ foreach ($log in @($shellLog, $panicLog, $hardDiskLog)) {
 try {
     Write-Output '[verify] Booting kernel and exercising the shell...'
     Start-TestVm $shellLog
-    foreach ($command in @('help', 'dir', 'type kernel.bin', 'type readme', 'md docs', 'md docs\sub', 'cd docs', 'write sub\test.txt nestedwrite', 'dir', 'type sub\test.txt', 'ren sub\test.txt sub\renamed.txt', 'del sub\renamed.txt', 'rd sub', 'cd \', 'rd docs', 'write test.txt verifywrite', 'ren test.txt renamed.txt', 'type renamed.txt', 'del renamed.txt', 'type renamed.txt', 'time', 'mem', 'echo verifyok')) {
+    foreach ($command in @('help', 'dir', 'type main.app', 'run main.app', 'type readme', 'md docs', 'md docs\sub', 'cd docs', 'write sub\test.txt nestedwrite', 'dir', 'type sub\test.txt', 'ren sub\test.txt sub\renamed.txt', 'del sub\renamed.txt', 'rd sub', 'cd \', 'rd docs', 'write test.txt verifywrite', 'ren test.txt renamed.txt', 'type renamed.txt', 'del renamed.txt', 'type renamed.txt', 'time', 'mem', 'echo verifyok')) {
         Send-GuestCommand $command
-        if ($command -eq 'type kernel.bin') {
-            Start-Sleep -Seconds 3
-        }
     }
     Stop-TestVm
 
@@ -218,16 +220,18 @@ try {
         'IDT EXCEPTIONS AND PIC INTERRUPTS READY',
         'PIT TIMER AT 100 HZ; KEYBOARD ON IRQ1',
         'FAT12 VOLUME MOUNTED FROM FLOPPY DRIVE A',
-        'COMMANDS: HELP VER CLS ECHO DIR TYPE WRITE DEL REN MD RD CD TIME MEM PANIC',
+        'COMMANDS: HELP VER CLS ECHO DIR TYPE RUN WRITE DEL REN MD RD CD TIME MEM PANIC',
         'DIRECTORY OF A:\',
         'KERNEL.BIN',
+        'COMMAND.APP',
+        'Hello from MAIN.APP!',
         'FILE WRITTEN.',
         'FILE RENAMED.',
         'FILE DELETED.',
         'DIRECTORY CREATED.',
-        'NESTEDWRITE',
+        'nestedwrite',
         'DIRECTORY REMOVED.',
-        'VERIFYWRITE',
+        'verifywrite',
         'FILE NOT FOUND: RENAMED.TXT',
         'VSDOS VERSION 0.1',
         'FILE NOT FOUND: README',
@@ -243,7 +247,7 @@ try {
         $shellOutput -notmatch 'KERNEL IMAGE:\s+[1-9][0-9]* BYTES') {
         throw 'Timer or kernel memory reporting returned an invalid value.'
     }
-    Assert-KernelFileRead $shellLog
+    Assert-FileRead $shellLog 'MAIN.APP'
     Write-Output '[verify] Boot, timer, keyboard, files, and shell commands passed.'
 
     Write-Output '[verify] Checking CPU exception reporting...'
@@ -261,11 +265,8 @@ try {
     Write-Output '[verify] CPU exception diagnostics passed.'
     Write-Output '[verify] Checking IDE hard-disk boot and ATA filesystem access...'
     Start-TestVm $hardDiskLog -HardDisk
-    foreach ($command in @('dir', 'type kernel.bin')) {
+    foreach ($command in @('dir', 'type main.app')) {
         Send-GuestCommand $command
-        if ($command -eq 'type kernel.bin') {
-            Start-Sleep -Seconds 3
-        }
     }
     Stop-TestVm
 
@@ -278,7 +279,7 @@ try {
         if (-not $hardDiskOutput.Contains($expected)) {
             throw "Hard-disk verification failed: expected output '$expected'."
         }
-        Assert-KernelFileRead $hardDiskLog
+        Assert-FileRead $hardDiskLog 'MAIN.APP'
     }
     Write-Output '[verify] IDE hard-disk boot and ATA filesystem access passed.'
     $verificationPassed = $true
