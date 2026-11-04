@@ -1,13 +1,8 @@
-# The Things That I'm Going To Hopefully Do To Make This Usable Today (In Order)
-1: Finish FAT-12 Filesystem (DONE).
-2: Add drivers, kernel calls, and an app API and SDK (DONE).
-3: Move shell to an app rather than being hard-coded into the kernel (and set up application function for this). (DONE)
-4: Add FAT-32 alongside the FAT-12 it uses right now.
-5: Add audio support.
-MORE COMING SOON!!!
+# Feature list
+1: Make the OS have a "VSDOS" folder which contains KERNEL.BIN and other OS files.
+2: Make drivers not be hard-coded into the kernel .IMG file and live in "VSDOS/DRIVERS" folder.
+3: Add FAT-32 alongside the FAT-12 it uses right now.
+4: Add audio support.
 
-# Kernel Shell -> COMMAND.APP Notes
-1: Built by build.bat rather than the standalone SDK. (DONE)
-2: Renamed to COMMAND.APP (To be more DOS-Like :P). (DONE)
-3: Remove test app from being built into the OS IMG. (DONE)
-4: Add AUTOEXEC.BAT
+# Things To Do That Will Keep This Project Stable And Stuff
+1: Fix the kernel so it isn't handling non-kernel tasks.

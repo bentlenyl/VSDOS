@@ -171,11 +171,7 @@ function Stop-TestVm {
 function Assert-FileRead([string]$LogPath, [string]$FileName) {
     $encoding = [Text.Encoding]::GetEncoding(28591)
     $log = $encoding.GetString([IO.File]::ReadAllBytes($LogPath))
-    $filePath = if ($FileName -ieq 'MAIN.APP') {
-        Join-Path $PSScriptRoot '..\sdk\build\MAIN.APP'
-    } else {
-        Join-Path $testDirectory $FileName
-    }
+    $filePath = Join-Path $testDirectory $FileName
     $file = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $filePath))
     $serialBytes = [IO.MemoryStream]::new()
 
@@ -210,7 +206,7 @@ foreach ($log in @($shellLog, $panicLog, $hardDiskLog)) {
 try {
     Write-Output '[verify] Booting kernel and exercising the shell...'
     Start-TestVm $shellLog
-    foreach ($command in @('help', 'dir', 'type main.app', 'run main.app', 'type readme', 'md docs', 'md docs\sub', 'cd docs', 'write sub\test.txt nestedwrite', 'dir', 'type sub\test.txt', 'ren sub\test.txt sub\renamed.txt', 'del sub\renamed.txt', 'rd sub', 'cd \', 'rd docs', 'write test.txt verifywrite', 'ren test.txt renamed.txt', 'type renamed.txt', 'del renamed.txt', 'type renamed.txt', 'time', 'mem', 'echo verifyok')) {
+    foreach ($command in @('help', 'dir', 'type autoexec.bat', 'type readme', 'md docs', 'md docs\sub', 'cd docs', 'write sub\test.txt nestedwrite', 'dir', 'type sub\test.txt', 'ren sub\test.txt sub\renamed.txt', 'del sub\renamed.txt', 'rd sub', 'cd \', 'rd docs', 'write test.txt verifywrite', 'ren test.txt renamed.txt', 'type renamed.txt', 'del renamed.txt', 'type renamed.txt', 'write batch.bat echo batchok', 'batch.bat', 'call batch.bat', 'autoexec.bat', 'time', 'mem', 'echo verifyok')) {
         Send-GuestCommand $command
     }
     Stop-TestVm
@@ -220,11 +216,13 @@ try {
         'IDT EXCEPTIONS AND PIC INTERRUPTS READY',
         'PIT TIMER AT 100 HZ; KEYBOARD ON IRQ1',
         'FAT12 VOLUME MOUNTED FROM FLOPPY DRIVE A',
-        'COMMANDS: HELP VER CLS ECHO DIR TYPE RUN WRITE DEL REN MD RD CD TIME MEM PANIC',
+        'COMMANDS: HELP VER CLS ECHO DIR TYPE RUN WRITE DEL REN MD RD CD TIME MEM PANIC CALL',
         'DIRECTORY OF A:\',
+        'AUTOEXEC.BAT',
         'KERNEL.BIN',
         'COMMAND.APP',
-        'Hello from MAIN.APP!',
+        'AUTOEXEC.BAT LOADED',
+        'BATCHOK',
         'FILE WRITTEN.',
         'FILE RENAMED.',
         'FILE DELETED.',
@@ -247,7 +245,7 @@ try {
         $shellOutput -notmatch 'KERNEL IMAGE:\s+[1-9][0-9]* BYTES') {
         throw 'Timer or kernel memory reporting returned an invalid value.'
     }
-    Assert-FileRead $shellLog 'MAIN.APP'
+    Assert-FileRead $shellLog 'AUTOEXEC.BAT'
     Write-Output '[verify] Boot, timer, keyboard, files, and shell commands passed.'
 
     Write-Output '[verify] Checking CPU exception reporting...'
@@ -265,7 +263,7 @@ try {
     Write-Output '[verify] CPU exception diagnostics passed.'
     Write-Output '[verify] Checking IDE hard-disk boot and ATA filesystem access...'
     Start-TestVm $hardDiskLog -HardDisk
-    foreach ($command in @('dir', 'type main.app')) {
+    foreach ($command in @('dir', 'type autoexec.bat')) {
         Send-GuestCommand $command
     }
     Stop-TestVm
@@ -279,7 +277,6 @@ try {
         if (-not $hardDiskOutput.Contains($expected)) {
             throw "Hard-disk verification failed: expected output '$expected'."
         }
-        Assert-FileRead $hardDiskLog 'MAIN.APP'
     }
     Write-Output '[verify] IDE hard-disk boot and ATA filesystem access passed.'
     $verificationPassed = $true

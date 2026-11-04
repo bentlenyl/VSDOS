@@ -41,7 +41,7 @@ echo.
 echo Requires NASM, LLVM Clang/LLD, and QEMU for run, test, and verify.
 echo Build creates a fresh FAT12 image; back up user files before rebuilding.
 echo WRITE creates or overwrites an 8.3 file with inline text; DEL, REN, DIR, TYPE, MD, RD, and CD support nested 8.3 paths.
-echo The build runs sdk\build.bat for MAIN.APP and builds the resident COMMAND.APP from src\shell.
+echo The build builds the resident COMMAND.APP from src\shell and installs AUTOEXEC.BAT.
 echo.
 exit /b 0
 
@@ -148,31 +148,28 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [2/12] Building the standalone SDK starter application...
-call sdk\build.bat
-if errorlevel 1 exit /b 1
-echo [3/12] Compiling COMMAND.APP...
+echo [2/11] Compiling COMMAND.APP...
 clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -I "src\shell" -c "src\shell\shell.c" -o "build\stage\shell.o"
 if errorlevel 1 exit /b 1
 nasm -f elf32 "src\shell\syscall.asm" -o "build\stage\shell_syscall.o"
 if errorlevel 1 exit /b 1
 ld.lld -m elf_i386 -T "sdk\linker.ld" --oformat=binary "build\stage\shell_syscall.o" "build\stage\shell.o" -o "build\stage\COMMAND.APP"
 if errorlevel 1 exit /b 1
-echo [4/12] Compiling the freestanding C kernel...
+echo [3/11] Compiling the freestanding C kernel...
 clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\kernel\kernel.c" -o "build\stage\kernel.o"
 if errorlevel 1 (
     echo ERROR: Kernel compilation failed.
     exit /b 1
 )
 
-echo [5/12] Compiling interrupt and timer support...
+echo [4/11] Compiling interrupt and timer support...
 clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\kernel\interrupts.c" -o "build\stage\interrupts_c.o"
 if errorlevel 1 (
     echo ERROR: Interrupt support compilation failed.
     exit /b 1
 )
 
-echo [6/12] Compiling disk, ATA, floppy, and FAT12 drivers...
+echo [5/11] Compiling disk, ATA, floppy, and FAT12 drivers...
 clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\kernel\ata.c" -o "build\stage\ata.o"
 if errorlevel 1 (
     echo ERROR: ATA disk driver compilation failed.
@@ -194,21 +191,21 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [7/12] Assembling the kernel entry point...
+echo [6/11] Assembling the kernel entry point...
 nasm -f elf32 "src\kernel\entry.asm" -o "build\stage\entry.o"
 if errorlevel 1 (
     echo ERROR: Kernel entry-point assembly failed.
     exit /b 1
 )
 
-echo [8/12] Assembling interrupt handlers...
+echo [7/11] Assembling interrupt handlers...
 nasm -f elf32 "src\kernel\interrupts.asm" -o "build\stage\interrupts.o"
 if errorlevel 1 (
     echo ERROR: Interrupt-handler assembly failed.
     exit /b 1
 )
 
-echo [9/12] Assembling the FAT12-aware BIOS loader...
+echo [8/11] Assembling the FAT12-aware BIOS loader...
 nasm -f bin "src\boot\stage2.asm" -o "build\stage\stage2.bin"
 if errorlevel 1 (
     echo ERROR: Second-stage BIOS loader assembly failed.
@@ -219,14 +216,14 @@ for %%F in ("build\stage\stage2.bin") do if not "%%~zF"=="4096" (
     exit /b 1
 )
 
-echo [10/12] Linking the flat kernel image...
+echo [9/11] Linking the flat kernel image...
 ld.lld -m elf_i386 -T "src\kernel\linker.ld" --oformat=binary "build\stage\entry.o" "build\stage\interrupts.o" "build\stage\interrupts_c.o" "build\stage\ata.o" "build\stage\disk.o" "build\stage\floppy.o" "build\stage\filesystem.o" "build\stage\kernel.o" -o "build\stage\kernel.bin"
 if errorlevel 1 (
     echo ERROR: Kernel linking failed.
     exit /b 1
 )
 
-echo [11/12] Assembling the FAT12 BIOS boot sector...
+echo [10/11] Assembling the FAT12 BIOS boot sector...
 nasm -f bin "src\boot\boot.asm" -o "build\stage\boot.bin"
 if errorlevel 1 (
     echo ERROR: Bootloader assembly failed.
@@ -237,8 +234,14 @@ for %%F in ("build\stage\boot.bin") do if not "%%~zF"=="512" (
     exit /b 1
 )
 
-echo [12/12] Formatting FAT12 and installing kernel, COMMAND.APP, and MAIN.APP...
-powershell -NoProfile -ExecutionPolicy Bypass -File "tools\make_image.ps1" -StageDirectory "build\stage" -OutputPath "build\stage\VeryStupidDOS.img" -AppPath "sdk\build\MAIN.APP" -ShellPath "build\stage\COMMAND.APP"
+echo [11/11] Formatting FAT12 and installing kernel, COMMAND.APP, and AUTOEXEC.BAT...
+copy /y "src\shell\AUTOEXEC.BAT" "build\AUTOEXEC.BAT" >nul
+copy /y "src\shell\AUTOEXEC.BAT" "build\stage\AUTOEXEC.BAT" >nul
+if errorlevel 1 (
+    echo ERROR: Could not copy AUTOEXEC.BAT into the build folders.
+    exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\make_image.ps1" -StageDirectory "build\stage" -OutputPath "build\stage\VeryStupidDOS.img" -ShellPath "build\stage\COMMAND.APP" -AutoexecPath "build\stage\AUTOEXEC.BAT"
 if errorlevel 1 (
     echo ERROR: Disk image creation failed.
     exit /b 1

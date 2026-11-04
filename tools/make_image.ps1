@@ -5,9 +5,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputPath,
 
-    [string]$AppPath,
+    [string]$ShellPath,
 
-    [string]$ShellPath
+    [string]$AutoexecPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,11 +111,11 @@ function Add-File([string]$Name, [byte[]]$Contents) {
     Add-RootEntry $Name 0x20 $firstCluster $Contents.Length
 }
 
-if ($AppPath -and [IO.File]::Exists($AppPath)) {
-    Add-File 'MAIN.APP' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $AppPath)))
-}
 if ($ShellPath -and [IO.File]::Exists($ShellPath)) {
     Add-File 'COMMAND.APP' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $ShellPath)))
+}
+if ($AutoexecPath -and [IO.File]::Exists($AutoexecPath)) {
+    Add-File 'AUTOEXEC.BAT' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $AutoexecPath)))
 }
 Add-File 'KERNEL.BIN' $kernel
 
@@ -128,4 +128,4 @@ for ($copy = 0; $copy -lt $fatCount; ++$copy) {
 [IO.File]::WriteAllBytes($output, $image)
 Write-Output "Created FAT12 floppy image: $output"
 Write-Output 'Volume: 1.44 MB FAT12, 512-byte sectors, root file KERNEL.BIN'
-Write-Output 'The volume is freshly formatted with KERNEL.BIN, COMMAND.APP, and MAIN.APP.'
+Write-Output 'The volume is freshly formatted with KERNEL.BIN, COMMAND.APP, and AUTOEXEC.BAT.'

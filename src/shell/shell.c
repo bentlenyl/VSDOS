@@ -3,6 +3,8 @@
 static char current_directory[128] = "\\";
 static char line[128];
 static char print_buffer[256];
+static char batch_line[128];
+static unsigned int batch_depth;
 
 static unsigned int text_length(const char *text)
 {
@@ -104,6 +106,118 @@ static int make_path(const char *input, char output[128])
     return 1;
 }
 
+static int has_extension(const char *name, const char *extension)
+{
+    unsigned int name_length = text_length(name);
+    unsigned int extension_length = text_length(extension);
+    unsigned int index;
+
+    if (name_length < extension_length) {
+        return 0;
+    }
+    for (index = 0; index < extension_length; ++index) {
+        char a = name[name_length - extension_length + index];
+        char b = extension[index];
+        if (a >= 'a' && a <= 'z') {
+            a = (char)(a - 'a' + 'A');
+        }
+        if (b >= 'a' && b <= 'z') {
+            b = (char)(b - 'a' + 'A');
+        }
+        if (a != b) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int execute_batch(const char *path);
+static void command(char *command_line);
+
+static void execute_batch_line(char *batch_command)
+{
+    unsigned int index = 0;
+    char rem[4];
+
+    while (*batch_command == ' ' || *batch_command == '\t') {
+        ++batch_command;
+    }
+    if (*batch_command == '@') {
+        ++batch_command;
+        while (*batch_command == ' ' || *batch_command == '\t') {
+            ++batch_command;
+        }
+    }
+    rem[0] = batch_command[0];
+    rem[1] = batch_command[1];
+    rem[2] = batch_command[2];
+    rem[3] = batch_command[3];
+    for (index = 0; index < 4; ++index) {
+        if (rem[index] >= 'a' && rem[index] <= 'z') {
+            rem[index] = (char)(rem[index] - 'a' + 'A');
+        }
+    }
+    if (*batch_command == '\0' ||
+        (rem[0] == 'R' && rem[1] == 'E' &&
+         rem[2] == 'M' &&
+         (rem[3] == ' ' || rem[3] == '\t' || rem[3] == '\0'))) {
+        return;
+    }
+    index = 0;
+    while (batch_command[index] != '\0' &&
+           batch_command[index] != '\r' &&
+           batch_command[index] != '\n') {
+        ++index;
+    }
+    batch_command[index] = '\0';
+    while (index != 0 &&
+           (batch_command[index - 1] == ' ' ||
+            batch_command[index - 1] == '\t')) {
+        batch_command[--index] = '\0';
+    }
+    if (*batch_command != '\0') {
+        command(batch_command);
+    }
+}
+
+static int execute_batch(const char *path)
+{
+    static const unsigned int maximum_batch_bytes = 4096;
+    char buffer[4096];
+    unsigned int length;
+    unsigned int index = 0;
+
+    if (batch_depth >= 8) {
+        print("BATCH NESTING TOO DEEP.\n");
+        return 0;
+    }
+    length = vsdos_read_file(path, buffer, maximum_batch_bytes);
+    if (length == 0xFFFFFFFF) {
+        return 0;
+    }
+    if (length > maximum_batch_bytes) {
+        length = maximum_batch_bytes;
+    }
+    ++batch_depth;
+    while (index < length) {
+        unsigned int line_length = 0;
+        while (index < length &&
+               buffer[index] != '\r' &&
+               buffer[index] != '\n' &&
+               line_length < sizeof(batch_line) - 1) {
+            batch_line[line_length++] = buffer[index++];
+        }
+        while (index < length &&
+               (buffer[index] == '\r' || buffer[index] == '\n')) {
+            ++index;
+        }
+        batch_line[line_length] = '\0';
+        execute_batch_line(batch_line);
+    }
+    --batch_depth;
+    return 1;
+}
+
 static void prompt(void)
 {
     char drive = vsdos_drive_letter();
@@ -143,8 +257,20 @@ static void command(char *command_line)
             ++argument;
         }
     }
-    if (equals(command_name, "HELP")) {
-        print("COMMANDS: HELP VER CLS ECHO DIR TYPE RUN WRITE DEL REN MD RD CD TIME MEM PANIC\n");
+    if (equals(command_name, "CALL")) {
+        if (!make_path(argument, path) || !execute_batch(path)) {
+            print("BATCH FILE NOT FOUND: ");
+            print(argument);
+            print("\n");
+        }
+    } else if (has_extension(command_name, ".BAT")) {
+        if (!make_path(command_name, path) || !execute_batch(path)) {
+            print("BATCH FILE NOT FOUND: ");
+            print(command_name);
+            print("\n");
+        }
+    } else if (equals(command_name, "HELP")) {
+        print("COMMANDS: HELP VER CLS ECHO DIR TYPE RUN WRITE DEL REN MD RD CD TIME MEM PANIC CALL\n");
     } else if (equals(command_name, "VER")) {
         print("VSDOS version 0.1\n");
     } else if (equals(command_name, "CLS")) {
@@ -172,22 +298,8 @@ static void command(char *command_line)
         print(":");
         print(list_path);
         print("\n\n");
-        if (list_path[0] == '\\' && list_path[1] == '\0') {
-            print("MAIN.APP\nCOMMAND.APP\nKERNEL.BIN\n\n");
-            return;
-        }
         while (vsdos_list(list_path, index++, &entry) == 0) {
             const char *display_name = entry.name;
-
-            if (list_path[0] == '\\' && list_path[1] == '\0') {
-                if (index == 1) {
-                    display_name = "MAIN.APP";
-                } else if (index == 2) {
-                    display_name = "COMMAND.APP";
-                } else if (index == 3) {
-                    display_name = "KERNEL.BIN";
-                }
-            }
             print(display_name);
             if ((entry.attributes & 0x10) != 0 &&
                 !(list_path[0] == '\\' && list_path[1] == '\0')) {
@@ -350,6 +462,7 @@ int main(void)
 
     print("VSDOS version 0.1\n");
     print("TYPE HELP FOR COMMANDS - USING FAT-12.\n\n");
+    execute_batch("\\AUTOEXEC.BAT");
     prompt();
     for (;;) {
         unsigned int scan_code = vsdos_read_key();

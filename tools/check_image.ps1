@@ -132,14 +132,13 @@ for ($index = 0; $index -lt $fat.Length; ++$index) {
     }
 }
 Assert-FileInRoot $kernel 'KERNEL.BIN'
-$app = [IO.File]::ReadAllBytes((Join-Path $stage '..\..\sdk\build\MAIN.APP'))
-Assert-FileInRoot $app 'MAIN.APP'
 $commandApp = [IO.File]::ReadAllBytes((Join-Path $stage 'COMMAND.APP'))
 Assert-FileInRoot $commandApp 'COMMAND.APP'
+$autoexec = [IO.File]::ReadAllBytes((Join-Path $PSScriptRoot '..\build\AUTOEXEC.BAT'))
+Assert-FileInRoot $autoexec 'AUTOEXEC.BAT'
 for ($entry = 3; $entry -lt $rootEntries; ++$entry) {
     if ($image[$rootOffset + $entry * 32] -ne 0) {
-        throw 'New FAT12 volumes must contain only KERNEL.BIN; unexpected preloaded files found.'
+        throw 'Unexpected preloaded file found after KERNEL.BIN, COMMAND.APP, and AUTOEXEC.BAT.'
     }
 }
-
-Write-Output "FAT12 image check passed: standard BPB, BIOS loaders, KERNEL.BIN, COMMAND.APP, and MAIN.APP."
+Write-Output "FAT12 image check passed: standard BPB, BIOS loaders, KERNEL.BIN, COMMAND.APP, and AUTOEXEC.BAT."
