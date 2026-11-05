@@ -170,17 +170,17 @@ if errorlevel 1 (
 )
 
 echo [5/11] Compiling disk, ATA, floppy, and FAT12 drivers...
-clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\kernel\ata.c" -o "build\stage\ata.o"
+clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\drivers\ata.c" -o "build\stage\ata.o"
 if errorlevel 1 (
     echo ERROR: ATA disk driver compilation failed.
     exit /b 1
 )
-clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\kernel\disk.c" -o "build\stage\disk.o"
+clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\drivers\disk.c" -o "build\stage\disk.o"
 if errorlevel 1 (
     echo ERROR: Disk backend compilation failed.
     exit /b 1
 )
-clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\kernel\floppy.c" -o "build\stage\floppy.o"
+clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\drivers\floppy.c" -o "build\stage\floppy.o"
 if errorlevel 1 (
     echo ERROR: Floppy-controller driver compilation failed.
     exit /b 1
@@ -241,7 +241,14 @@ if errorlevel 1 (
     echo ERROR: Could not copy AUTOEXEC.BAT into the build folders.
     exit /b 1
 )
-powershell -NoProfile -ExecutionPolicy Bypass -File "tools\make_image.ps1" -StageDirectory "build\stage" -OutputPath "build\stage\VeryStupidDOS.img" -ShellPath "build\stage\COMMAND.APP" -AutoexecPath "build\stage\AUTOEXEC.BAT"
+copy /y "build\stage\ata.o" "build\stage\ATA.DRV" >nul
+copy /y "build\stage\disk.o" "build\stage\DISK.DRV" >nul
+copy /y "build\stage\floppy.o" "build\stage\FLOPPY.DRV" >nul
+if errorlevel 1 (
+    echo ERROR: Could not stage external driver payloads.
+    exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\make_image.ps1" -StageDirectory "build\stage" -OutputPath "build\stage\VeryStupidDOS.img" -ShellPath "build\stage\COMMAND.APP" -AutoexecPath "build\stage\AUTOEXEC.BAT" -AtaDriverPath "build\stage\ATA.DRV" -DiskDriverPath "build\stage\DISK.DRV" -FloppyDriverPath "build\stage\FLOPPY.DRV"
 if errorlevel 1 (
     echo ERROR: Disk image creation failed.
     exit /b 1

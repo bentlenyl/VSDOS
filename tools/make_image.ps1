@@ -7,7 +7,13 @@ param(
 
     [string]$ShellPath,
 
-    [string]$AutoexecPath
+    [string]$AutoexecPath,
+
+    [string]$AtaDriverPath,
+
+    [string]$DiskDriverPath,
+
+    [string]$FloppyDriverPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,13 +117,88 @@ function Add-File([string]$Name, [byte[]]$Contents) {
     Add-RootEntry $Name 0x20 $firstCluster $Contents.Length
 }
 
+function Add-Directory([string]$Name) {
+    if ($script:nextFreeCluster + 1 -gt $clusterCount + 2) {
+        throw "Not enough FAT12 clusters for $Name."
+    }
+    $cluster = $script:nextFreeCluster
+    ++$script:nextFreeCluster
+    Add-FatEntry $cluster 0xFFF
+    $offset = ($dataStart + $cluster - 2) * $sectorSize
+    for ($index = 0; $index -lt $sectorSize; ++$index) {
+        $image[$offset + $index] = 0
+    }
+    $dotName = '.' + (' ' * 10)
+    $dotDotName = '..' + (' ' * 9)
+    $dot = [Text.Encoding]::ASCII.GetBytes($dotName)
+    $dotDot = [Text.Encoding]::ASCII.GetBytes($dotDotName)
+    [Array]::Copy($dot, 0, $image, $offset, 11)
+    $image[$offset + 11] = 0x10
+    $image[$offset + 26] = [byte]($cluster -band 0xFF)
+    $image[$offset + 27] = [byte](($cluster -shr 8) -band 0xFF)
+    [Array]::Copy($dotDot, 0, $image, $offset + 32, 11)
+    $image[$offset + 43] = 0x10
+    $image[$offset + 58] = 0
+    $image[$offset + 59] = 0
+    Add-RootEntry $Name 0x10 $cluster 0
+    return $cluster
+}
+
+$script:vsdosDirectoryIndex = 2
+
+function Add-DirectoryFile([int]$DirectoryCluster, [string]$Name, [byte[]]$Contents) {
+    $clusterCountForFile = [int][Math]::Ceiling($Contents.Length / [double]$sectorSize)
+    $firstCluster = 0
+    if ($clusterCountForFile -gt 0) {
+        $firstCluster = $script:nextFreeCluster
+        if ($firstCluster + $clusterCountForFile -gt $clusterCount + 2) {
+            throw "Not enough FAT12 clusters for $Name."
+        }
+        for ($clusterOffset = 0; $clusterOffset -lt $clusterCountForFile; ++$clusterOffset) {
+            $cluster = $firstCluster + $clusterOffset
+            $next = if ($clusterOffset + 1 -eq $clusterCountForFile) { 0xFFF } else { $cluster + 1 }
+            Add-FatEntry $cluster $next
+            $sourceOffset = $clusterOffset * $sectorSize
+            $dataLength = [Math]::Min($sectorSize, $Contents.Length - $sourceOffset)
+            $destinationOffset = ($dataStart + $cluster - 2) * $sectorSize
+            [Array]::Copy($Contents, $sourceOffset, $image, $destinationOffset, $dataLength)
+        }
+        $script:nextFreeCluster += $clusterCountForFile
+    }
+
+    $directoryOffset = ($dataStart + $DirectoryCluster - 2) * $sectorSize
+    $entryOffset = $directoryOffset + $script:vsdosDirectoryIndex * 32
+    $parts = $Name.ToUpperInvariant().Split('.')
+    $encodedName = $parts[0].PadRight(8) + $(if ($parts.Count -eq 2) { $parts[1].PadRight(3) } else { '   ' })
+    $encoded = [Text.Encoding]::ASCII.GetBytes($encodedName)
+    [Array]::Copy($encoded, 0, $image, $entryOffset, 11)
+    $image[$entryOffset + 11] = 0x20
+    $image[$entryOffset + 26] = [byte]($firstCluster -band 0xFF)
+    $image[$entryOffset + 27] = [byte](($firstCluster -shr 8) -band 0xFF)
+    $image[$entryOffset + 28] = [byte]($Contents.Length -band 0xFF)
+    $image[$entryOffset + 29] = [byte](($Contents.Length -shr 8) -band 0xFF)
+    $image[$entryOffset + 30] = [byte](($Contents.Length -shr 16) -band 0xFF)
+    $image[$entryOffset + 31] = [byte](($Contents.Length -shr 24) -band 0xFF)
+    ++$script:vsdosDirectoryIndex
+}
+
 if ($ShellPath -and [IO.File]::Exists($ShellPath)) {
     Add-File 'COMMAND.APP' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $ShellPath)))
 }
 if ($AutoexecPath -and [IO.File]::Exists($AutoexecPath)) {
     Add-File 'AUTOEXEC.BAT' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $AutoexecPath)))
 }
-Add-File 'KERNEL.BIN' $kernel
+$vsdosCluster = Add-Directory 'VSDOS'
+Add-DirectoryFile $vsdosCluster 'KERNEL.BIN' $kernel
+if ($AtaDriverPath -and [IO.File]::Exists($AtaDriverPath)) {
+    Add-DirectoryFile $vsdosCluster 'ATA.DRV' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $AtaDriverPath)))
+}
+if ($DiskDriverPath -and [IO.File]::Exists($DiskDriverPath)) {
+    Add-DirectoryFile $vsdosCluster 'DISK.DRV' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $DiskDriverPath)))
+}
+if ($FloppyDriverPath -and [IO.File]::Exists($FloppyDriverPath)) {
+    Add-DirectoryFile $vsdosCluster 'FLOPPY.DRV' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $FloppyDriverPath)))
+}
 
 for ($copy = 0; $copy -lt $fatCount; ++$copy) {
     [Array]::Copy($fat, 0, $image, ($reservedSectors + $copy * $sectorsPerFat) * $sectorSize, $fat.Length)
@@ -127,5 +208,5 @@ for ($copy = 0; $copy -lt $fatCount; ++$copy) {
 [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($output)) | Out-Null
 [IO.File]::WriteAllBytes($output, $image)
 Write-Output "Created FAT12 floppy image: $output"
-Write-Output 'Volume: 1.44 MB FAT12, 512-byte sectors, root file KERNEL.BIN'
-Write-Output 'The volume is freshly formatted with KERNEL.BIN, COMMAND.APP, and AUTOEXEC.BAT.'
+Write-Output 'Volume: 1.44 MB FAT12, 512-byte sectors'
+Write-Output 'The volume contains AUTOEXEC.BAT, COMMAND.APP, the VSDOS directory, and external storage drivers.'

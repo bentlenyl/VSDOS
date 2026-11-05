@@ -175,11 +175,13 @@ function Assert-FileRead([string]$LogPath, [string]$FileName) {
     $file = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $filePath))
     $serialBytes = [IO.MemoryStream]::new()
 
+    $previousWasCarriageReturn = $false
     foreach ($value in $file) {
-        if ($value -eq 10) {
+        if ($value -eq 10 -and -not $previousWasCarriageReturn) {
             $serialBytes.WriteByte(13)
         }
         $serialBytes.WriteByte($value)
+        $previousWasCarriageReturn = ($value -eq 13)
     }
 
     $command = "TYPE $($FileName.ToUpperInvariant())`r`n"
@@ -206,10 +208,11 @@ foreach ($log in @($shellLog, $panicLog, $hardDiskLog)) {
 try {
     Write-Output '[verify] Booting kernel and exercising the shell...'
     Start-TestVm $shellLog
-    foreach ($command in @('help', 'dir', 'type autoexec.bat', 'type readme', 'md docs', 'md docs\sub', 'cd docs', 'write sub\test.txt nestedwrite', 'dir', 'type sub\test.txt', 'ren sub\test.txt sub\renamed.txt', 'del sub\renamed.txt', 'rd sub', 'cd \', 'rd docs', 'write test.txt verifywrite', 'ren test.txt renamed.txt', 'type renamed.txt', 'del renamed.txt', 'type renamed.txt', 'write batch.bat echo batchok', 'batch.bat', 'call batch.bat', 'autoexec.bat', 'time', 'mem', 'echo verifyok')) {
+    foreach ($command in @('help', 'dir', 'type autoexec.bat', 'cd vsdos', 'dir', 'type kernel.bin', 'type ata.drv', 'cd \', 'type readme', 'md docs', 'md docs\sub', 'cd docs', 'write sub\test.txt nestedwrite', 'dir', 'type sub\test.txt', 'ren sub\test.txt sub\renamed.txt', 'del sub\renamed.txt', 'rd sub', 'cd \', 'rd docs', 'write test.txt verifywrite', 'ren test.txt renamed.txt', 'type renamed.txt', 'del renamed.txt', 'type renamed.txt', 'write batch.bat echo batchok', 'batch.bat', 'call batch.bat', 'autoexec.bat', 'time', 'mem', 'echo verifyok')) {
         Send-GuestCommand $command
     }
     Stop-TestVm
+    Assert-FileRead $shellLog 'AUTOEXEC.BAT'
 
     $shellOutput = [IO.File]::ReadAllText($shellLog)
     foreach ($expected in @(
@@ -219,7 +222,11 @@ try {
         'COMMANDS: HELP VER CLS ECHO DIR TYPE RUN WRITE DEL REN MD RD CD TIME MEM PANIC CALL',
         'DIRECTORY OF A:\',
         'AUTOEXEC.BAT',
-        'KERNEL.BIN',
+        'VSDOS',
+        'VSDOS  <DIR>',
+        'ATA.DRV',
+        'DISK.DRV',
+        'FLOPPY.DRV',
         'COMMAND.APP',
         'AUTOEXEC.BAT LOADED',
         'BATCHOK',
@@ -245,7 +252,6 @@ try {
         $shellOutput -notmatch 'KERNEL IMAGE:\s+[1-9][0-9]* BYTES') {
         throw 'Timer or kernel memory reporting returned an invalid value.'
     }
-    Assert-FileRead $shellLog 'AUTOEXEC.BAT'
     Write-Output '[verify] Boot, timer, keyboard, files, and shell commands passed.'
 
     Write-Output '[verify] Checking CPU exception reporting...'
@@ -272,7 +278,7 @@ try {
     foreach ($expected in @(
         'FAT12 VOLUME MOUNTED FROM IDE HARD DISK C',
         'DIRECTORY OF C:\',
-        'KERNEL.BIN'
+        'VSDOS'
     )) {
         if (-not $hardDiskOutput.Contains($expected)) {
             throw "Hard-disk verification failed: expected output '$expected'."

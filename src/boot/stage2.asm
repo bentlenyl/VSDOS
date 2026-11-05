@@ -43,7 +43,7 @@ stage2_start:
     mov es, ax
     xor di, di
     mov cx, ROOT_ENTRIES
-.find_kernel:
+.find_vsdos:
     cmp byte [es:di], 0
     je kernel_not_found
     cmp byte [es:di], 0xE5
@@ -51,8 +51,57 @@ stage2_start:
     mov al, [es:di + 11]
     cmp al, 0x0F
     je .next_entry
+    test al, 0x10
+    jz .next_entry
+
+    push cx
+    push di
+    mov si, vsdos_directory_filename
+    mov cx, 11
+    repe cmpsb
+    pop di
+    pop cx
+    jne .next_entry
+    mov ax, [es:di + 26]
+    mov [current_cluster], ax
+    jmp .vsdos_found
+
+.next_entry:
+    add di, 32
+    loop .find_vsdos
+    jmp kernel_not_found
+
+.vsdos_found:
+    mov ax, [current_cluster]
+    cmp ax, 2
+    jb disk_error
+    cmp ax, 2840
+    jae disk_error
+    sub ax, 2
+    add ax, DATA_LBA
+    movzx eax, ax
+    mov [disk_packet + 8], eax
+    mov dword [disk_packet + 12], 0
+    mov word [disk_packet + 2], 1
+    mov word [disk_packet + 4], 0
+    mov word [disk_packet + 6], 0x0400
+    call read_disk
+    jc disk_error
+
+    mov ax, 0x0400
+    mov es, ax
+    xor di, di
+    mov cx, 16
+.find_kernel:
+    cmp byte [es:di], 0
+    je kernel_not_found
+    cmp byte [es:di], 0xE5
+    je .next_kernel_entry
+    mov al, [es:di + 11]
+    cmp al, 0x0F
+    je .next_kernel_entry
     test al, 0x18
-    jnz .next_entry
+    jnz .next_kernel_entry
 
     push cx
     push di
@@ -63,7 +112,7 @@ stage2_start:
     pop cx
     je .kernel_found
 
-.next_entry:
+.next_kernel_entry:
     add di, 32
     loop .find_kernel
     jmp kernel_not_found
@@ -265,6 +314,7 @@ request_segment dw 0
 request_cylinder db 0
 request_head db 0
 kernel_filename db 'KERNEL  BIN'
+vsdos_directory_filename db 'VSDOS      '
 loading_message db 'BIOS: LOADING FAT-12 KERNEL', 13, 10, 0
 loaded_message db 'BOOT: KERNEL LOADED', 13, 10, 0
 not_found_message db 'ERROR: KERNEL.BIN MISSING, INCORRECT, OR CORRUPTED', 13, 10, 0

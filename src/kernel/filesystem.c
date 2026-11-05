@@ -1,5 +1,5 @@
 #include "filesystem.h"
-#include "disk.h"
+#include "../drivers/disk.h"
 
 #define FAT_SECTOR_SIZE 512
 #define FAT_MAX_SECTORS_PER_FAT 9

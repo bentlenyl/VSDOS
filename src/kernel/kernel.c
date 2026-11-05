@@ -1,6 +1,6 @@
 #include "interrupts.h"
 #include "filesystem.h"
-#include "disk.h"
+#include "../drivers/disk.h"
 
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
@@ -31,6 +31,7 @@
 static u8 terminal_row;
 static u8 terminal_column;
 static u8 uart_ready;
+static char terminal_last_output_character;
 static u16 input_start_position;
 static char current_drive_letter = 'A';
 static char *syscall_file_buffer;
@@ -386,10 +387,11 @@ static void terminal_write_bytes(const char *text, u32 length)
             terminal_write_char(character);
             continue;
         }
-        if (character == '\n') {
+        if (character == '\n' && terminal_last_output_character != '\r') {
             serial_write_byte('\r');
         }
         serial_write_byte(character);
+        terminal_last_output_character = character;
 
         if (character == '\r') {
             terminal_column = 0;

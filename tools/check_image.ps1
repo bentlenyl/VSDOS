@@ -83,6 +83,57 @@ function Assert-FileInRoot([byte[]]$Data, [string]$ShortName) {
     throw "Required file missing from FAT12 root directory: $ShortName."
 }
 
+function Assert-DirectoryFile([byte[]]$DirectoryBytes, [string]$ShortName, [byte[]]$Data) {
+    $parts = $ShortName.ToUpperInvariant().Split('.')
+    $name = $parts[0].PadRight(8) +
+        $(if ($parts.Count -eq 2) { $parts[1].PadRight(3) } else { '   ' })
+    $encoded = [Text.Encoding]::ASCII.GetBytes($name)
+    for ($entry = 2; $entry -lt 16; ++$entry) {
+        $offset = $entry * 32
+        $matches = $true
+        for ($character = 0; $character -lt 11; ++$character) {
+            if ($DirectoryBytes[$offset + $character] -ne $encoded[$character]) {
+                $matches = $false
+                break
+            }
+        }
+        if ($matches) {
+            if ((Read-U32 $DirectoryBytes ($offset + 28)) -ne $Data.Length) {
+                throw "Unexpected on-disk size in VSDOS for $ShortName."
+            }
+            $cluster = Read-U16 $DirectoryBytes ($offset + 26)
+            if ($Data.Length -eq 0) {
+                if ($cluster -ne 0) {
+                    throw "Unexpected cluster for zero-length $ShortName."
+                }
+                return
+            }
+            $actual = New-Object byte[] $Data.Length
+            $copied = 0
+            $steps = 0
+            while ($copied -lt $Data.Length) {
+                if ($cluster -lt 2 -or $cluster -ge $clusterCount + 2 -or
+                    ++$steps -gt $clusterCount) {
+                    throw "Invalid FAT12 chain in VSDOS for $ShortName."
+                }
+                $sector = $dataStart + $cluster - 2
+                $source = $sector * $sectorSize
+                $amount = [Math]::Min($sectorSize, $Data.Length - $copied)
+                [Array]::Copy($image, $source, $actual, $copied, $amount)
+                $copied += $amount
+                if ($copied -lt $Data.Length) {
+                    $cluster = Get-Fat12Entry $fat $cluster
+                }
+            }
+            if (-not [Linq.Enumerable]::SequenceEqual([byte[]]$Data, [byte[]]$actual)) {
+                throw "On-disk contents do not match VSDOS\$ShortName."
+            }
+            return
+        }
+    }
+    throw "Required file missing from VSDOS directory: $ShortName."
+}
+
 $sectorSize = Read-U16 $image 11
 $sectorsPerCluster = $image[13]
 $reservedSectors = Read-U16 $image 14
@@ -131,14 +182,35 @@ for ($index = 0; $index -lt $fat.Length; ++$index) {
         throw 'The two FAT copies do not match.'
     }
 }
-Assert-FileInRoot $kernel 'KERNEL.BIN'
 $commandApp = [IO.File]::ReadAllBytes((Join-Path $stage 'COMMAND.APP'))
 Assert-FileInRoot $commandApp 'COMMAND.APP'
 $autoexec = [IO.File]::ReadAllBytes((Join-Path $PSScriptRoot '..\build\AUTOEXEC.BAT'))
 Assert-FileInRoot $autoexec 'AUTOEXEC.BAT'
-for ($entry = 3; $entry -lt $rootEntries; ++$entry) {
-    if ($image[$rootOffset + $entry * 32] -ne 0) {
-        throw 'Unexpected preloaded file found after KERNEL.BIN, COMMAND.APP, and AUTOEXEC.BAT.'
+$vsdosCluster = 0
+for ($entry = 0; $entry -lt $rootEntries; ++$entry) {
+    $offset = $rootOffset + $entry * 32
+    if ([Text.Encoding]::ASCII.GetString($image, $offset, 11) -eq 'VSDOS      ') {
+        $vsdosCluster = Read-U16 $image ($offset + 26)
+        break
     }
 }
-Write-Output "FAT12 image check passed: standard BPB, BIOS loaders, KERNEL.BIN, COMMAND.APP, and AUTOEXEC.BAT."
+if ($vsdosCluster -lt 2) {
+    throw 'Required VSDOS directory is missing from the FAT12 root.'
+}
+$vsdosSector = $dataStart + $vsdosCluster - 2
+$vsdosOffset = $vsdosSector * $sectorSize
+$vsdosDirectory = New-Object byte[] $sectorSize
+[Array]::Copy($image, $vsdosOffset, $vsdosDirectory, 0, $sectorSize)
+Assert-DirectoryFile $vsdosDirectory 'KERNEL.BIN' $kernel
+$ataDriver = [IO.File]::ReadAllBytes((Join-Path $stage 'ATA.DRV'))
+$diskDriver = [IO.File]::ReadAllBytes((Join-Path $stage 'DISK.DRV'))
+$floppyDriver = [IO.File]::ReadAllBytes((Join-Path $stage 'FLOPPY.DRV'))
+Assert-DirectoryFile $vsdosDirectory 'ATA.DRV' $ataDriver
+Assert-DirectoryFile $vsdosDirectory 'DISK.DRV' $diskDriver
+Assert-DirectoryFile $vsdosDirectory 'FLOPPY.DRV' $floppyDriver
+for ($entry = 3; $entry -lt $rootEntries; ++$entry) {
+    if ($image[$rootOffset + $entry * 32] -ne 0) {
+        throw 'Unexpected preloaded root entry found after AUTOEXEC.BAT, COMMAND.APP, and VSDOS.'
+    }
+}
+Write-Output "FAT12 image check passed: BIOS, AUTOEXEC.BAT, COMMAND.APP, KERNEL.BIN, and external storage drivers."

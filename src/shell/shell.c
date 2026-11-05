@@ -301,8 +301,7 @@ static void command(char *command_line)
         while (vsdos_list(list_path, index++, &entry) == 0) {
             const char *display_name = entry.name;
             print(display_name);
-            if ((entry.attributes & 0x10) != 0 &&
-                !(list_path[0] == '\\' && list_path[1] == '\0')) {
+            if ((entry.attributes & 0x10) != 0) {
                 print("  <DIR>\n");
             } else {
                 unsigned int length = text_length(display_name);
