@@ -203,10 +203,8 @@ $vsdosDirectory = New-Object byte[] $sectorSize
 [Array]::Copy($image, $vsdosOffset, $vsdosDirectory, 0, $sectorSize)
 Assert-DirectoryFile $vsdosDirectory 'KERNEL.BIN' $kernel
 $ataDriver = [IO.File]::ReadAllBytes((Join-Path $stage 'ATA.DRV'))
-$diskDriver = [IO.File]::ReadAllBytes((Join-Path $stage 'DISK.DRV'))
 $floppyDriver = [IO.File]::ReadAllBytes((Join-Path $stage 'FLOPPY.DRV'))
 Assert-DirectoryFile $vsdosDirectory 'ATA.DRV' $ataDriver
-Assert-DirectoryFile $vsdosDirectory 'DISK.DRV' $diskDriver
 Assert-DirectoryFile $vsdosDirectory 'FLOPPY.DRV' $floppyDriver
 for ($entry = 3; $entry -lt $rootEntries; ++$entry) {
     if ($image[$rootOffset + $entry * 32] -ne 0) {

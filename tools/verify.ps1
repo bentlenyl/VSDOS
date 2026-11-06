@@ -225,7 +225,6 @@ try {
         'VSDOS',
         'VSDOS  <DIR>',
         'ATA.DRV',
-        'DISK.DRV',
         'FLOPPY.DRV',
         'COMMAND.APP',
         'AUTOEXEC.BAT LOADED',

@@ -1,5 +1,5 @@
 # VSDOS
-A 32-Bit DOS-Like OS that's somewhat inspired by Linux. Pretty much, I already disliked Linux but still wanted the cool setup that Linux has (where you can make it into pretty much any OS). So, I made this. It's DOS-like because it's WAY easier to recreate than Windows NT plus the thing I disliked about Linux is how different it is from Windows. The main function, build, and behavior is similar to DOS and Windows but with some newer features such as multitasking, networking, etc (Planned in future). This OS is still intended for older computers that contain a floppy disk drive.
+A 32-Bit DOS-Like OS that's somewhat inspired by Linux. Pretty much, I already disliked Linux but still wanted the cool setup that Linux has (where you can make it into pretty much any OS). So, I made this. It's DOS-like because it's WAY easier to recreate than Windows, plus the thing I disliked about Linux is how different it is from Windows. The main function, build, and behavior is similar to DOS and early Windows but with some newer features to make this a little more useful than just installing DOS. This OS is still intended for older computers that contain a floppy disk drive, so don't expect Windows 11 features from this.
 
 # BUILD TOOLS NEEDED
 [NASM](https://www.nasm.us/pub/nasm/releasebuilds/3.02 "NASM"), [LLVM Clang](https://github.com/llvm/llvm-project/releases/tag/llvmorg-18.1.8 "LLVM Clang"), [QEMU](https://sourceforge.net/app/qemu/ "QEMU").
@@ -32,4 +32,4 @@ You need a VM with a floppy drive. Put the built .img file into the floppy slot,
 - Call: Runs a batch file from the shell (eg. call setup.bat).
 
 # APPLICATION API AND SDK
-The SDK and application API let you make apps for the OS. The API folder works standalone from the OS, so you don't need the OS source code to develop an app. Apps call int 0x80 API through the SDK runtime. MAIN.APP is only a standalone SDK example and is not included in normal OS builds.
+The SDK and application API let you make apps for the OS. The API folder works standalone from the OS, so you don't need the OS source code to develop an app. Apps call int 0x80 API through the SDK runtime. MAIN.APP is only a standalone SDK example and is not included in normal OS builds. SDK applications support command-line arguments, normal integer exit codes, filesystem operations, keyboard input, line editing, timers, screen clearing, and application launching.

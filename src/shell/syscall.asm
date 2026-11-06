@@ -16,8 +16,11 @@ global vsdos_rename_file
 global vsdos_make_directory
 global vsdos_remove_directory
 global vsdos_run_app
+global vsdos_run_app_args
 global vsdos_clear
 global vsdos_ticks
+global vsdos_kernel_memory_size
+global vsdos_kernel_stack_top
 global vsdos_exit
 extern main
 
@@ -135,6 +138,15 @@ vsdos_run_app:
     pop ebx
     ret
 
+vsdos_run_app_args:
+    push ebx
+    mov eax, 12
+    mov ebx, [esp + 8]
+    mov ecx, [esp + 12]
+    int 0x80
+    pop ebx
+    ret
+
 vsdos_clear:
     mov eax, 13
     int 0x80
@@ -142,6 +154,16 @@ vsdos_clear:
 
 vsdos_ticks:
     mov eax, 5
+    int 0x80
+    ret
+
+vsdos_kernel_memory_size:
+    mov eax, 17
+    int 0x80
+    ret
+
+vsdos_kernel_stack_top:
+    mov eax, 18
     int 0x80
     ret
 

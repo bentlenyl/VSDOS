@@ -174,6 +174,16 @@ stage2_start:
     jmp .load_cluster
 
 kernel_loaded:
+    mov si, ata_driver_filename
+    mov word [load_segment], 0x3000
+    call load_flat_driver
+    jc disk_error
+
+    mov si, floppy_driver_filename
+    mov word [load_segment], 0x3100
+    call load_flat_driver
+    jc disk_error
+
     mov si, loaded_message
     call print_string
     cli
@@ -192,6 +202,95 @@ disk_error:
     mov si, disk_error_message
     call print_string
     jmp stage2_halt
+
+load_flat_driver:
+    mov ax, 0x0400
+    mov es, ax
+    xor di, di
+    mov cx, 16
+.find_entry:
+    cmp byte [es:di], 0
+    je .not_found
+    cmp byte [es:di], 0xE5
+    je .next_entry
+    mov al, [es:di + 11]
+    cmp al, 0x0F
+    je .next_entry
+    test al, 0x18
+    jnz .next_entry
+
+    push cx
+    push di
+    push si
+    mov cx, 11
+    repe cmpsb
+    pop si
+    pop di
+    pop cx
+    je .found
+.next_entry:
+    add di, 32
+    loop .find_entry
+.not_found:
+    stc
+    ret
+.found:
+    mov ax, [es:di + 26]
+    mov [current_cluster], ax
+    mov eax, [es:di + 28]
+    test eax, eax
+    jz .not_found
+    cmp eax, 65024
+    ja .not_found
+    add eax, 511
+    shr eax, 9
+    mov [remaining_sectors], ax
+    mov word [load_offset], 0
+.load_cluster:
+    mov ax, [current_cluster]
+    cmp ax, 2
+    jb .not_found
+    cmp ax, 2840
+    jae .not_found
+    sub ax, 2
+    add ax, DATA_LBA
+    movzx eax, ax
+    mov [disk_packet + 8], eax
+    mov dword [disk_packet + 12], 0
+    mov word [disk_packet + 2], 1
+    mov ax, [load_offset]
+    mov [disk_packet + 4], ax
+    mov ax, [load_segment]
+    mov [disk_packet + 6], ax
+    call read_disk
+    jc .not_found
+
+    add word [load_offset], 512
+    dec word [remaining_sectors]
+    jz .loaded
+
+    mov ax, [current_cluster]
+    mov bx, ax
+    shr ax, 1
+    add ax, bx
+    mov di, ax
+    mov ax, 0x0600
+    mov es, ax
+    mov ax, [es:di]
+    test byte [current_cluster], 1
+    jz .even_cluster
+    shr ax, 4
+    jmp .next_cluster
+.even_cluster:
+    and ax, 0x0FFF
+.next_cluster:
+    cmp ax, 0x0FF8
+    jae .not_found
+    mov [current_cluster], ax
+    jmp .load_cluster
+.loaded:
+    clc
+    ret
 
 read_disk:
     pusha
@@ -307,6 +406,7 @@ current_cluster dw 0
 remaining_sectors dw 0
 remaining_bytes dd 0
 load_offset dw 0
+load_segment dw 0
 request_lba dd 0
 request_remaining dw 0
 request_offset dw 0
@@ -314,6 +414,8 @@ request_segment dw 0
 request_cylinder db 0
 request_head db 0
 kernel_filename db 'KERNEL  BIN'
+ata_driver_filename db 'ATA     DRV'
+floppy_driver_filename db 'FLOPPY  DRV'
 vsdos_directory_filename db 'VSDOS      '
 loading_message db 'BIOS: LOADING FAT-12 KERNEL', 13, 10, 0
 loaded_message db 'BOOT: KERNEL LOADED', 13, 10, 0

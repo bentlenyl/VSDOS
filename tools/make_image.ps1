@@ -11,8 +11,6 @@ param(
 
     [string]$AtaDriverPath,
 
-    [string]$DiskDriverPath,
-
     [string]$FloppyDriverPath
 )
 
@@ -192,9 +190,6 @@ $vsdosCluster = Add-Directory 'VSDOS'
 Add-DirectoryFile $vsdosCluster 'KERNEL.BIN' $kernel
 if ($AtaDriverPath -and [IO.File]::Exists($AtaDriverPath)) {
     Add-DirectoryFile $vsdosCluster 'ATA.DRV' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $AtaDriverPath)))
-}
-if ($DiskDriverPath -and [IO.File]::Exists($DiskDriverPath)) {
-    Add-DirectoryFile $vsdosCluster 'DISK.DRV' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $DiskDriverPath)))
 }
 if ($FloppyDriverPath -and [IO.File]::Exists($FloppyDriverPath)) {
     Add-DirectoryFile $vsdosCluster 'FLOPPY.DRV' ([IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $FloppyDriverPath)))

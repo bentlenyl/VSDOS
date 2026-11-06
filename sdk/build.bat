@@ -25,10 +25,16 @@ clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 ^
     -fno-asynchronous-unwind-tables -fno-unwind-tables ^
     -I include -c main.c -o build\main.o
 if errorlevel 1 exit /b 1
+clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 ^
+    -Wall -Wextra -Werror -ffreestanding -fno-builtin ^
+    -fno-stack-protector -fno-pic -fno-pie ^
+    -fno-asynchronous-unwind-tables -fno-unwind-tables ^
+    -I include -c vsdos.c -o build\vsdos.o
+if errorlevel 1 exit /b 1
 nasm -f elf32 runtime\syscall.asm -o build\syscall.o
 if errorlevel 1 exit /b 1
 ld.lld -m elf_i386 -T linker-main.ld --oformat=binary ^
-    build\syscall.o build\main.o -o build\MAIN.APP
+    build\syscall.o build\vsdos.o build\main.o -o build\MAIN.APP
 if errorlevel 1 exit /b 1
 echo SDK build complete: sdk\build\MAIN.APP
 exit /b 0

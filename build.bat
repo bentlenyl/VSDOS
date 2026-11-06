@@ -185,6 +185,20 @@ if errorlevel 1 (
     echo ERROR: Floppy-controller driver compilation failed.
     exit /b 1
 )
+clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -I "src\drivers" -c "src\drivers\ata_entry.c" -o "build\stage\ata_entry.o"
+if errorlevel 1 exit /b 1
+clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -I "src\drivers" -c "src\drivers\floppy_entry.c" -o "build\stage\floppy_entry.o"
+if errorlevel 1 exit /b 1
+ld.lld -m elf_i386 -Ttext=0x00030000 --entry=driver_entry --oformat=binary "build\stage\ata_entry.o" "build\stage\ata.o" -o "build\stage\ATA.DRV"
+if errorlevel 1 (
+    echo ERROR: ATA.DRV external driver linking failed.
+    exit /b 1
+)
+ld.lld -m elf_i386 -Ttext=0x00031000 --entry=driver_entry --oformat=binary "build\stage\floppy_entry.o" "build\stage\floppy.o" -o "build\stage\FLOPPY.DRV"
+if errorlevel 1 (
+    echo ERROR: FLOPPY.DRV external driver linking failed.
+    exit /b 1
+)
 clang --target=i386-unknown-none-elf -m32 -march=i386 -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables -c "src\kernel\filesystem.c" -o "build\stage\filesystem.o"
 if errorlevel 1 (
     echo ERROR: FAT12 filesystem compilation failed.
@@ -217,7 +231,7 @@ for %%F in ("build\stage\stage2.bin") do if not "%%~zF"=="4096" (
 )
 
 echo [9/11] Linking the flat kernel image...
-ld.lld -m elf_i386 -T "src\kernel\linker.ld" --oformat=binary "build\stage\entry.o" "build\stage\interrupts.o" "build\stage\interrupts_c.o" "build\stage\ata.o" "build\stage\disk.o" "build\stage\floppy.o" "build\stage\filesystem.o" "build\stage\kernel.o" -o "build\stage\kernel.bin"
+ld.lld -m elf_i386 -T "src\kernel\linker.ld" --oformat=binary "build\stage\entry.o" "build\stage\interrupts.o" "build\stage\interrupts_c.o" "build\stage\disk.o" "build\stage\filesystem.o" "build\stage\kernel.o" -o "build\stage\kernel.bin"
 if errorlevel 1 (
     echo ERROR: Kernel linking failed.
     exit /b 1
@@ -241,14 +255,7 @@ if errorlevel 1 (
     echo ERROR: Could not copy AUTOEXEC.BAT into the build folders.
     exit /b 1
 )
-copy /y "build\stage\ata.o" "build\stage\ATA.DRV" >nul
-copy /y "build\stage\disk.o" "build\stage\DISK.DRV" >nul
-copy /y "build\stage\floppy.o" "build\stage\FLOPPY.DRV" >nul
-if errorlevel 1 (
-    echo ERROR: Could not stage external driver payloads.
-    exit /b 1
-)
-powershell -NoProfile -ExecutionPolicy Bypass -File "tools\make_image.ps1" -StageDirectory "build\stage" -OutputPath "build\stage\VeryStupidDOS.img" -ShellPath "build\stage\COMMAND.APP" -AutoexecPath "build\stage\AUTOEXEC.BAT" -AtaDriverPath "build\stage\ATA.DRV" -DiskDriverPath "build\stage\DISK.DRV" -FloppyDriverPath "build\stage\FLOPPY.DRV"
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\make_image.ps1" -StageDirectory "build\stage" -OutputPath "build\stage\VeryStupidDOS.img" -ShellPath "build\stage\COMMAND.APP" -AutoexecPath "build\stage\AUTOEXEC.BAT" -AtaDriverPath "build\stage\ATA.DRV" -FloppyDriverPath "build\stage\FLOPPY.DRV"
 if errorlevel 1 (
     echo ERROR: Disk image creation failed.
     exit /b 1

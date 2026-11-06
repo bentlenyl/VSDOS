@@ -74,6 +74,18 @@ static void number(unsigned int value)
     }
 }
 
+static void hexadecimal(unsigned int value)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    int shift;
+
+    print("0x");
+    for (shift = 28; shift >= 0; shift -= 4) {
+        char digit = digits[(value >> shift) & 0x0F];
+        vsdos_print(&digit, 1);
+    }
+}
+
 static int make_path(const char *input, char output[128])
 {
     unsigned int length = 0;
@@ -269,6 +281,11 @@ static void command(char *command_line)
             print(command_name);
             print("\n");
         }
+    } else if (has_extension(command_name, ".APP")) {
+        if (!make_path(command_name, path) ||
+            vsdos_run_app_args(path, argument) != 0) {
+            print("ERROR: APP FAILED OR NOT FOUND.\n");
+        }
     } else if (equals(command_name, "HELP")) {
         print("COMMANDS: HELP VER CLS ECHO DIR TYPE RUN WRITE DEL REN MD RD CD TIME MEM PANIC CALL\n");
     } else if (equals(command_name, "VER")) {
@@ -329,7 +346,21 @@ static void command(char *command_line)
             }
         }
     } else if (equals(command_name, "RUN")) {
-        if (!make_path(argument, path) || vsdos_run_app(path) != 0) {
+        char *app_name = argument;
+        char *app_arguments = argument;
+
+        while (*app_arguments != '\0' && *app_arguments != ' ' &&
+               *app_arguments != '\t') {
+            ++app_arguments;
+        }
+        if (*app_arguments != '\0') {
+            *app_arguments++ = '\0';
+            while (*app_arguments == ' ' || *app_arguments == '\t') {
+                ++app_arguments;
+            }
+        }
+        if (!make_path(app_name, path) ||
+            vsdos_run_app_args(path, app_arguments) != 0) {
             print("ERROR: APP FAILED OR NOT FOUND.\n");
         }
     } else if (equals(command_name, "WRITE")) {
@@ -434,8 +465,12 @@ static void command(char *command_line)
         number((ticks / 10) % 10);
         print(" seconds\n");
     } else if (equals(command_name, "MEM")) {
-        print("Kernel image: 1 bytes\n");
-        print("Kernel stack top: 0x00090000\n");
+        print("Kernel image: ");
+        number(vsdos_kernel_memory_size());
+        print(" bytes\n");
+        print("Kernel stack top: ");
+        hexadecimal(vsdos_kernel_stack_top());
+        print("\n");
     } else if (equals(command_name, "PANIC")) {
         __asm__ volatile ("ud2");
     } else {

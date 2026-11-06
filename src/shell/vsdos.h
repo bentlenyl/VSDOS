@@ -23,8 +23,11 @@ vsdos_u32 vsdos_rename_file(const char *old_path, const char *new_path);
 vsdos_u32 vsdos_make_directory(const char *path);
 vsdos_u32 vsdos_remove_directory(const char *path);
 vsdos_u32 vsdos_run_app(const char *path);
+vsdos_u32 vsdos_run_app_args(const char *path, const char *arguments);
 void vsdos_clear(void);
 vsdos_u32 vsdos_ticks(void);
+vsdos_u32 vsdos_kernel_memory_size(void);
+vsdos_u32 vsdos_kernel_stack_top(void);
 void vsdos_exit(vsdos_u32 status);
 
 #endif

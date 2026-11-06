@@ -1,4 +1,5 @@
 #include "disk.h"
+#include "driver_api.h"
 
 #define FDC_DOR 0x3F2
 #define FDC_MSR 0x3F4
@@ -25,8 +26,14 @@ static u8 controller_ready;
 static u8 initialization_error;
 static u8 dma_buffer[FDC_SECTOR_SIZE] __attribute__((aligned(65536)));
 
-extern u32 interrupt_irq_count(u8 irq);
-extern u32 timer_get_ticks(void);
+static drv_timer_fn floppy_timer_get_ticks;
+static drv_irq_count_fn floppy_interrupt_irq_count;
+
+void floppy_set_callbacks(drv_timer_fn timer, drv_irq_count_fn irq_count)
+{
+    floppy_timer_get_ticks = timer;
+    floppy_interrupt_irq_count = irq_count;
+}
 
 static inline void outb(u16 port, u8 value)
 {
@@ -88,10 +95,10 @@ static int read_fifo(u8 *value)
 
 static int wait_irq(u32 previous_count)
 {
-    u32 start = timer_get_ticks();
+    u32 start = floppy_timer_get_ticks ? floppy_timer_get_ticks() : 0;
 
-    while (interrupt_irq_count(6) == previous_count) {
-        if (timer_get_ticks() - start >= FDC_COMMAND_TIMEOUT_TICKS) {
+    while (floppy_interrupt_irq_count && floppy_interrupt_irq_count(6) == previous_count) {
+        if (!floppy_timer_get_ticks || floppy_timer_get_ticks() - start >= FDC_COMMAND_TIMEOUT_TICKS) {
             return 0;
         }
         __asm__ volatile ("pause");
@@ -101,10 +108,10 @@ static int wait_irq(u32 previous_count)
 
 static int wait_data_result(void)
 {
-    u32 start = timer_get_ticks();
+    u32 start = floppy_timer_get_ticks ? floppy_timer_get_ticks() : 0;
 
     while ((inb(FDC_MSR) & 0xC0) != 0xC0) {
-        if (timer_get_ticks() - start >= FDC_COMMAND_TIMEOUT_TICKS) {
+        if (!floppy_timer_get_ticks || floppy_timer_get_ticks() - start >= FDC_COMMAND_TIMEOUT_TICKS) {
             return 0;
         }
         __asm__ volatile ("pause");
@@ -134,9 +141,9 @@ static int start_motor(void)
     }
     outb(FDC_DOR, drive_motor_value());
     if (!motor_running[selected_drive]) {
-        u32 start = timer_get_ticks();
+        u32 start = floppy_timer_get_ticks ? floppy_timer_get_ticks() : 0;
 
-        while (timer_get_ticks() - start < 50) {
+        while (!floppy_timer_get_ticks || floppy_timer_get_ticks() - start < 50) {
             __asm__ volatile ("pause");
         }
         motor_running[selected_drive] = 1;
@@ -150,7 +157,7 @@ static int recalibrate(void)
     u8 cylinder;
     u32 previous_irq;
 
-    previous_irq = interrupt_irq_count(6);
+    previous_irq = floppy_interrupt_irq_count ? floppy_interrupt_irq_count(6) : 0;
     if (!write_fifo(0x07) ||
         !write_fifo(selected_drive) ||
         !wait_irq(previous_irq) ||
@@ -175,7 +182,7 @@ static int seek_track(u8 cylinder, u8 head)
     if (current_cylinder[selected_drive] == cylinder) {
         return 1;
     }
-    previous_irq = interrupt_irq_count(6);
+    previous_irq = floppy_interrupt_irq_count ? floppy_interrupt_irq_count(6) : 0;
     if (!write_fifo(0x0F) ||
         !write_fifo(head_drive) ||
         !write_fifo(cylinder) ||
@@ -290,7 +297,7 @@ int floppy_initialize(u8 drive)
 
     selected_drive = drive;
     controller_ready = 0;
-    previous_irq = interrupt_irq_count(6);
+    previous_irq = floppy_interrupt_irq_count ? floppy_interrupt_irq_count(6) : 0;
     outb(FDC_DOR, 0x00);
     outb(FDC_DOR, 0x0C);
     if (!wait_irq(previous_irq)) {
